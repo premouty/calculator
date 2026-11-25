@@ -65,6 +65,7 @@ data class CalculatorUiState(
     val isTopHistoryOpen: Boolean = false,
     val isFullHistorySheetOpen: Boolean = false,
     val isCameraScannerOpen: Boolean = false,
+    val isVoiceInputDialogOpen: Boolean = false,
     val cameraScanAnalysisState: CameraScanAnalysisState = CameraScanAnalysisState.Idle,
     val bigNumberViewerRecord: Pair<String, String>? = null, // title/expression to full plain digits
     val history: List<CalculationRecord> = emptyList()
@@ -444,8 +445,34 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         _state.update {
             it.copy(
                 isFullHistorySheetOpen = open,
-                isTopHistoryOpen = if (open) false else it.isTopHistoryOpen
+                isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
+                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
             )
+        }
+    }
+
+    fun setVoiceInputDialogOpen(open: Boolean) {
+        _state.update {
+            it.copy(
+                isVoiceInputDialogOpen = open,
+                isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
+                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen
+            )
+        }
+    }
+
+    fun applyVoiceExpression(rawExpr: String, evaluateImmediately: Boolean) {
+        val cleaned = rawExpr.trim()
+        if (cleaned.isEmpty()) return
+        _state.update {
+            it.copy(
+                isVoiceInputDialogOpen = false,
+                lastCompletedExpression = ""
+            )
+        }
+        updateExpression(cleaned, isResult = false)
+        if (evaluateImmediately) {
+            onEquals()
         }
     }
 
@@ -458,7 +485,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 isCameraScannerOpen = open,
                 cameraScanAnalysisState = if (!open) CameraScanAnalysisState.Idle else it.cameraScanAnalysisState,
                 isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
-                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen
+                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen,
+                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
             )
         }
     }

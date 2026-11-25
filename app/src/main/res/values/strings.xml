@@ -78,4 +78,28 @@
     <string name="camera_scan_mode_ai">ШІ</string>
     <string name="camera_scan_mode_fast">Швидко</string>
     <string name="camera_scan_ai_error_title">Помилка ШІ-аналізу</string>
+
+    <string name="cd_quick_power">Піднести до степеня</string>
+    <string name="quick_power_label">xʸ</string>
+
+    <string name="cd_voice_input">Голосове введення</string>
+    <string name="voice_input_chip">Голос</string>
+    <string name="voice_input_title">Голосове введення</string>
+    <string name="voice_listening">Слухаю… скажіть приклад</string>
+    <string name="voice_speak_hint">Наприклад: «двадцять п’ять плюс п’ятнадцять» або «два в степені десять»</string>
+    <string name="voice_tap_to_speak">Натисніть мікрофон, щоб почати</string>
+    <string name="voice_stop_listening">Зупинити</string>
+    <string name="voice_spoken_label">Почуто:</string>
+    <string name="voice_parsed_label">Вираз:</string>
+    <string name="voice_no_math_found">Не вдалося виділити математичний вираз. Спробуйте сказати чіткіше, наприклад: «12 помножити на 4».</string>
+    <string name="voice_apply">Вставити</string>
+    <string name="voice_evaluate">Порахувати</string>
+    <string name="voice_retry">Сказати ще раз</string>
+    <string name="voice_unavailable">Розпізнавання мовлення недоступне на цьому пристрої</string>
+    <string name="voice_error_no_match">Не вдалося розпізнати мовлення. Спробуйте ще раз</string>
+    <string name="voice_error_generic">Помилка розпізнавання мовлення (%1$d)</string>
+    <string name="voice_permission_title">Потрібен доступ до мікрофона</string>
+    <string name="voice_permission_body">Дозвольте доступ до мікрофона, щоб диктувати приклади та обчислення голосом.</string>
+    <string name="voice_permission_grant">Надати доступ</string>
+    <string name="voice_permission_settings">Відкрити налаштування</string>
 </resources>

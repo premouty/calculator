@@ -7,7 +7,11 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -363,38 +367,81 @@ private fun CameraPhotoCaptureAndSelectFlow(
 
     val runOfflineMlKit: (Bitmap) -> Unit = { bitmap ->
         val mainExecutor = ContextCompat.getMainExecutor(context)
-        val inputImage = InputImage.fromBitmap(bitmap, 0)
-        textRecognizer.process(inputImage)
-            .addOnSuccessListener(mainExecutor) { visionText ->
-                val candidates = visionText.textBlocks.flatMap { block ->
-                    block.lines.map { line ->
-                        val rect = line.boundingBox
-                        OcrLineCandidate(
-                            text = line.text,
-                            box = rect?.let {
-                                OcrBox(
-                                    left = it.left.toFloat(),
-                                    top = it.top.toFloat(),
-                                    right = it.right.toFloat(),
-                                    bottom = it.bottom.toFloat()
-                                )
+
+        fun extractFromVisionText(
+            visionText: com.google.mlkit.vision.text.Text,
+            coordScale: Float
+        ): List<ScannedMathExpression> {
+            val invScale = if (coordScale > 0f) 1f / coordScale else 1f
+            val candidates = visionText.textBlocks.flatMap { block ->
+                block.lines.map { line ->
+                    val rect = line.boundingBox
+                    OcrLineCandidate(
+                        text = line.text,
+                        box = rect?.let {
+                            OcrBox(
+                                left = it.left * invScale,
+                                top = it.top * invScale,
+                                right = it.right * invScale,
+                                bottom = it.bottom * invScale
+                            )
+                        }
+                    )
+                }
+            }
+            return MathExpressionOcrParser.extractAllExpressions(
+                lines = candidates,
+                angleUnit = latestAngleUnit
+            )
+        }
+
+        captureExecutor.execute {
+            val (enhancedBitmap, scaleFactor) = prepareBitmapForOfflineOcr(bitmap)
+            val enhancedImage = InputImage.fromBitmap(enhancedBitmap, 0)
+            textRecognizer.process(enhancedImage)
+                .addOnSuccessListener(mainExecutor) { enhancedVision ->
+                    val enhancedExprs = extractFromVisionText(enhancedVision, scaleFactor)
+                    if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                        enhancedBitmap.recycle()
+                    }
+                    if (enhancedExprs.isNotEmpty()) {
+                        onSetOfflineResult(enhancedExprs)
+                        selectedExpressionId = enhancedExprs.firstOrNull()?.id
+                        isProcessingCapture = false
+                    } else {
+                        // Second pass on untouched original bitmap in case contrast clipped faint ink
+                        textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                            .addOnSuccessListener(mainExecutor) { rawVision ->
+                                val rawExprs = extractFromVisionText(rawVision, 1f)
+                                onSetOfflineResult(rawExprs)
+                                selectedExpressionId = rawExprs.firstOrNull()?.id
+                                isProcessingCapture = false
                             }
-                        )
+                            .addOnFailureListener(mainExecutor) {
+                                onSetOfflineResult(emptyList())
+                                selectedExpressionId = null
+                                isProcessingCapture = false
+                            }
                     }
                 }
-                val expressions = MathExpressionOcrParser.extractAllExpressions(
-                    lines = candidates,
-                    angleUnit = latestAngleUnit
-                )
-                onSetOfflineResult(expressions)
-                selectedExpressionId = expressions.firstOrNull()?.id
-                isProcessingCapture = false
-            }
-            .addOnFailureListener(mainExecutor) {
-                onSetOfflineResult(emptyList())
-                selectedExpressionId = null
-                isProcessingCapture = false
-            }
+                .addOnFailureListener(mainExecutor) {
+                    if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                        enhancedBitmap.recycle()
+                    }
+                    textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                        .addOnSuccessListener(mainExecutor) { rawVision ->
+                            val rawExprs = extractFromVisionText(rawVision, 1f)
+                            onSetOfflineResult(rawExprs)
+                            selectedExpressionId = rawExprs.firstOrNull()?.id
+                            isProcessingCapture = false
+                        }
+                        .addOnFailureListener(mainExecutor) {
+                            onSetOfflineResult(emptyList())
+                            selectedExpressionId = null
+                            isProcessingCapture = false
+                        }
+                }
+        }
     }
 
     val retakePhoto: () -> Unit = {
@@ -2044,6 +2091,46 @@ private fun cropToNormalizedZoneAndScale(
     }
 
     return current
+}
+
+private fun prepareBitmapForOfflineOcr(source: Bitmap): Pair<Bitmap, Float> {
+    val maxSide = maxOf(source.width, source.height).coerceAtLeast(1)
+    val scaleFactor = if (maxSide < 1200) {
+        (1200f / maxSide.toFloat()).coerceAtMost(2.2f)
+    } else {
+        1f
+    }
+
+    val targetW = (source.width * scaleFactor).roundToInt().coerceAtLeast(1)
+    val targetH = (source.height * scaleFactor).roundToInt().coerceAtLeast(1)
+
+    val output = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(output)
+
+    // Desaturate + boost contrast so ink stands out cleanly from grid/tinted paper
+    val grayscale = ColorMatrix().apply { setSaturation(0f) }
+    val contrast = 1.48f
+    val translate = (-0.5f * contrast + 0.5f) * 255f + 12f
+    val contrastMatrix = ColorMatrix(
+        floatArrayOf(
+            contrast, 0f, 0f, 0f, translate,
+            0f, contrast, 0f, 0f, translate,
+            0f, 0f, contrast, 0f, translate,
+            0f, 0f, 0f, 1f, 0f
+        )
+    )
+    grayscale.postConcat(contrastMatrix)
+
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        colorFilter = ColorMatrixColorFilter(grayscale)
+    }
+    val matrix = Matrix().apply {
+        if (scaleFactor != 1f) {
+            setScale(scaleFactor, scaleFactor)
+        }
+    }
+    canvas.drawBitmap(source, matrix, paint)
+    return output to scaleFactor
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

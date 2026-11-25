@@ -166,4 +166,55 @@ class MathExpressionOcrParserTest {
         )
         assertNull(invalid)
     }
+
+    @Test
+    fun `extractAllExpressions merges horizontal split fragments and preserves parenthesized divisor`() {
+        val lines = listOf(
+            OcrLineCandidate("25 +", OcrBox(20f, 100f, 100f, 140f)),
+            OcrLineCandidate("15", OcrBox(112f, 100f, 160f, 140f)),
+            OcrLineCandidate("(12 + 8) / 4", OcrBox(20f, 200f, 240f, 240f))
+        )
+
+        val results = MathExpressionOcrParser.extractAllExpressions(lines, AngleUnit.DEG)
+        assertEquals(2, results.size)
+        assertEquals("25+15", results[0].rawExpression)
+        assertEquals("40", results[0].previewResult)
+        assertEquals("(12+8)÷4", results[1].rawExpression)
+        assertEquals("5", results[1].previewResult)
+    }
+
+    @Test
+    fun `extractAllExpressions reconstructs spatial superscripts and vertical stacked fractions`() {
+        val lines = listOf(
+            // 2^3 where 3 is raised and smaller to the upper-right of 2
+            OcrLineCandidate("2", OcrBox(20f, 100f, 50f, 150f)),
+            OcrLineCandidate("3", OcrBox(54f, 92f, 74f, 122f)),
+            // Stacked fraction (12 + 8) / (4)
+            OcrLineCandidate("12 + 8", OcrBox(40f, 220f, 160f, 255f)),
+            OcrLineCandidate("------", OcrBox(35f, 260f, 165f, 268f)),
+            OcrLineCandidate("4", OcrBox(85f, 272f, 115f, 308f))
+        )
+
+        val results = MathExpressionOcrParser.extractAllExpressions(lines, AngleUnit.DEG)
+        assertEquals(2, results.size)
+        assertEquals("2^3", results[0].rawExpression)
+        assertEquals("8", results[0].previewResult)
+        assertEquals("(12+8)÷(4)", results[1].rawExpression)
+        assertEquals("5", results[1].previewResult)
+    }
+
+    @Test
+    fun `extractAllExpressions recovers ML Kit typos, Unicode superscripts, and Ukrainian aliases`() {
+        val lines = listOf(
+            OcrLineCandidate("V(16) + 2⁴", OcrBox(20f, 80f, 200f, 120f)),
+            OcrLineCandidate("lg(100) + tg(45)", OcrBox(20f, 160f, 240f, 200f))
+        )
+
+        val results = MathExpressionOcrParser.extractAllExpressions(lines, AngleUnit.DEG)
+        assertEquals(2, results.size)
+        assertEquals("√(16)+2^4", results[0].rawExpression)
+        assertEquals("20", results[0].previewResult)
+        assertEquals("log(100)+tan(45)", results[1].rawExpression)
+        assertEquals("3", results[1].previewResult)
+    }
 }

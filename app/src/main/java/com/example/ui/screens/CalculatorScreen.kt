@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.Functions
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -73,6 +74,7 @@ import com.example.ui.components.FullHistoryBottomSheet
 import com.example.ui.components.LocalPerformCalcHaptic
 import com.example.ui.components.LocalPlayCalcSound
 import com.example.ui.components.TopPullDownHistoryOverlay
+import com.example.ui.components.VoiceMathInputDialog
 import com.example.ui.theme.PlusJakartaSansFontFamily
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -165,6 +167,8 @@ fun CalculatorScreen(
                             ScientificToggleStrip(
                                 isExpanded = state.isScientificExpanded,
                                 onToggle = viewModel::toggleScientificExpanded,
+                                onQuickPower = { viewModel.onOperator("^") },
+                                onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
                                 onOpenCameraScanner = { viewModel.setCameraScannerOpen(true) }
                             )
 
@@ -242,6 +246,8 @@ fun CalculatorScreen(
                             ScientificToggleStrip(
                                 isExpanded = state.isScientificExpanded,
                                 onToggle = viewModel::toggleScientificExpanded,
+                                onQuickPower = { viewModel.onOperator("^") },
+                                onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
                                 onOpenCameraScanner = { viewModel.setCameraScannerOpen(true) }
                             )
 
@@ -338,6 +344,19 @@ fun CalculatorScreen(
                 onDismiss = viewModel::closeBigNumberViewer
             )
         }
+
+        if (state.isVoiceInputDialogOpen) {
+            VoiceMathInputDialog(
+                angleUnit = state.angleUnit,
+                onInsertExpression = { expr ->
+                    viewModel.applyVoiceExpression(expr, evaluateImmediately = false)
+                },
+                onEvaluateExpression = { expr ->
+                    viewModel.applyVoiceExpression(expr, evaluateImmediately = true)
+                },
+                onDismiss = { viewModel.setVoiceInputDialogOpen(false) }
+            )
+        }
     }
 }
 
@@ -345,6 +364,8 @@ fun CalculatorScreen(
 private fun ScientificToggleStrip(
     isExpanded: Boolean,
     onToggle: () -> Unit,
+    onQuickPower: () -> Unit,
+    onOpenVoiceInput: () -> Unit,
     onOpenCameraScanner: () -> Unit
 ) {
     val arrowRotation by animateFloatAsState(
@@ -359,87 +380,147 @@ private fun ScientificToggleStrip(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            shape = CircleShape,
-            color = if (isExpanded) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-            modifier = Modifier
-                .minimumInteractiveComponentSize()
-                .clip(CircleShape)
-                .clickable(onClick = onToggle)
-                .testTag("toggle_scientific_panel")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Surface(
+                shape = CircleShape,
+                color = if (isExpanded) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggle)
+                    .testTag("toggle_scientific_panel")
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Functions,
-                    contentDescription = stringResource(R.string.cd_scientific_toggle),
-                    tint = if (isExpanded) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "fx",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isExpanded) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
-                )
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = if (isExpanded) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier
-                        .size(16.dp)
-                        .rotate(arrowRotation)
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Functions,
+                        contentDescription = stringResource(R.string.cd_scientific_toggle),
+                        tint = if (isExpanded) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "fx",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isExpanded) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = if (isExpanded) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier
+                            .size(16.dp)
+                            .rotate(arrowRotation)
+                    )
+                }
+            }
+
+            // Quick exponent (xʸ) pill always accessible without expanding fx
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable(onClick = onQuickPower)
+                    .testTag("btn_quick_pow")
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = stringResource(R.string.quick_power_label),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            modifier = Modifier
-                .minimumInteractiveComponentSize()
-                .clip(CircleShape)
-                .clickable(onClick = onOpenCameraScanner)
-                .testTag("open_camera_scanner_button")
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenVoiceInput)
+                    .testTag("open_voice_input_button")
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.DocumentScanner,
-                    contentDescription = stringResource(R.string.cd_camera_scan),
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = stringResource(R.string.camera_scan_chip),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Mic,
+                        contentDescription = stringResource(R.string.cd_voice_input),
+                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.voice_input_chip),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenCameraScanner)
+                    .testTag("open_camera_scanner_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.DocumentScanner,
+                        contentDescription = stringResource(R.string.cd_camera_scan),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.camera_scan_chip),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
             }
         }
     }
