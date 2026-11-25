@@ -53,30 +53,33 @@ class CameraMathAiAnalyzer {
         bitmap: Bitmap,
         angleUnit: AngleUnit
     ): List<ScannedMathExpression> {
+        if (bitmap.isRecycled) return emptyList()
         val inferenceBitmap = withContext(Dispatchers.Default) {
             scaleDownForInference(bitmap, maxDimension = 1280)
         }
         val shouldRecycleCopy = inferenceBitmap !== bitmap
 
         return try {
-            val response = model.generateContent(
-                content {
-                    image(inferenceBitmap)
-                    text(
-                        """
-                        Extract all mathematical expressions, equations, and meaningful standalone numbers visible in this image (printed or handwritten).
-                        Rules:
-                        - Convert stacked fractions into parenthesized division, e.g., (a+b)/(c+d) or (3)/(4).
-                        - Convert radicals into sqrt(...), exponents into ^ (e.g., 2^3), trig into sin(...), cos(...), tan(...), asin(...), acos(...), atan(...), logarithms into ln(...) or log(...), constants into pi or e.
-                        - Use standard calculator operators +, -, *, / and decimal dots '.' (convert European decimal commas to dots, ignore thousands separators).
-                        - If an equation shows '= result' or '= ?' (like '25 + 15 = 40'), return ONLY the left-hand expression ('25 + 15').
-                        - Strip problem numbering prefixes like '1)', '2.', 'a)' and any surrounding text.
-                        - For each detected expression, provide its tight bounding box normalized to [ymin, xmin, ymax, xmax] on a 0..1000 scale.
-                        - Return an empty expressions array if no numbers or math expressions are present.
-                        """.trimIndent()
-                    )
-                }
-            )
+            val response = withContext(Dispatchers.IO) {
+                model.generateContent(
+                    content {
+                        image(inferenceBitmap)
+                        text(
+                            """
+                            Extract all mathematical expressions, equations, and meaningful standalone numbers visible in this image (printed or handwritten).
+                            Rules:
+                            - Convert stacked fractions into parenthesized division, e.g., (a+b)/(c+d) or (3)/(4).
+                            - Convert radicals into sqrt(...), exponents into ^ (e.g., 2^3), trig into sin(...), cos(...), tan(...), asin(...), acos(...), atan(...), logarithms into ln(...) or log(...), constants into pi or e.
+                            - Use standard calculator operators +, -, *, / and decimal dots '.' (convert European decimal commas to dots, ignore thousands separators).
+                            - If an equation shows '= result' or '= ?' (like '25 + 15 = 40'), return ONLY the left-hand expression ('25 + 15').
+                            - Strip problem numbering prefixes like '1)', '2.', 'a)' and any surrounding text.
+                            - For each detected expression, provide its tight bounding box normalized to [ymin, xmin, ymax, xmax] on a 0..1000 scale.
+                            - Return an empty expressions array if no numbers or math expressions are present.
+                            """.trimIndent()
+                        )
+                    }
+                )
+            }
 
             val jsonString = response.text
                 ?: throw IllegalStateException("Модель повернула порожню відповідь.")

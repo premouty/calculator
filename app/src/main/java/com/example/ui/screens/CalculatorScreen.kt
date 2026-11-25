@@ -1,12 +1,17 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -36,8 +41,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -47,13 +54,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -74,7 +94,7 @@ import com.example.ui.components.FullHistoryBottomSheet
 import com.example.ui.components.LocalPerformCalcHaptic
 import com.example.ui.components.LocalPlayCalcSound
 import com.example.ui.components.TopPullDownHistoryOverlay
-import com.example.ui.components.VoiceMathInputDialog
+import com.example.ui.components.VoiceMathInputOverlay
 import com.example.ui.theme.PlusJakartaSansFontFamily
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -97,13 +117,18 @@ fun CalculatorScreen(
         }
     }
 
+    val view = LocalView.current
+    val performHapticWithView: (com.example.audio.CalcSoundType) -> Unit = remember(viewModel, view) {
+        { type -> viewModel.performHaptic(type, view) }
+    }
+
     BackHandler(enabled = state.isTopHistoryOpen) {
         viewModel.setTopHistoryOpen(false)
     }
 
     CompositionLocalProvider(
         LocalPlayCalcSound provides viewModel::playSound,
-        LocalPerformCalcHaptic provides viewModel::performHaptic
+        LocalPerformCalcHaptic provides performHapticWithView
     ) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -154,8 +179,7 @@ fun CalculatorScreen(
                                 state = state,
                                 onToggleTheme = viewModel::cycleThemeMode,
                                 onToggleSound = viewModel::toggleSoundEnabled,
-                                onToggleVibration = viewModel::toggleVibrationEnabled,
-                                onToggleAngleUnit = viewModel::toggleAngleUnit,
+                                onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
                                 onToggleTopHistory = viewModel::toggleTopHistory,
                                 onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
                                 onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
@@ -167,7 +191,6 @@ fun CalculatorScreen(
                             ScientificToggleStrip(
                                 isExpanded = state.isScientificExpanded,
                                 onToggle = viewModel::toggleScientificExpanded,
-                                onQuickPower = { viewModel.onOperator("^") },
                                 onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
                                 onOpenCameraScanner = { viewModel.setCameraScannerOpen(true) }
                             )
@@ -230,8 +253,7 @@ fun CalculatorScreen(
                                 state = state,
                                 onToggleTheme = viewModel::cycleThemeMode,
                                 onToggleSound = viewModel::toggleSoundEnabled,
-                                onToggleVibration = viewModel::toggleVibrationEnabled,
-                                onToggleAngleUnit = viewModel::toggleAngleUnit,
+                                onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
                                 onToggleTopHistory = viewModel::toggleTopHistory,
                                 onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
                                 onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
@@ -246,7 +268,6 @@ fun CalculatorScreen(
                             ScientificToggleStrip(
                                 isExpanded = state.isScientificExpanded,
                                 onToggle = viewModel::toggleScientificExpanded,
-                                onQuickPower = { viewModel.onOperator("^") },
                                 onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
                                 onOpenCameraScanner = { viewModel.setCameraScannerOpen(true) }
                             )
@@ -320,6 +341,18 @@ fun CalculatorScreen(
                     onTransferExpression = viewModel::applyScannedExpression,
                     onDismiss = { viewModel.setCameraScannerOpen(false) }
                 )
+
+                VoiceMathInputOverlay(
+                    visible = state.isVoiceInputDialogOpen,
+                    angleUnit = state.angleUnit,
+                    onInsertExpression = { expr ->
+                        viewModel.applyVoiceExpression(expr, evaluateImmediately = false)
+                    },
+                    onEvaluateExpression = { expr ->
+                        viewModel.applyVoiceExpression(expr, evaluateImmediately = true)
+                    },
+                    onDismiss = { viewModel.setVoiceInputDialogOpen(false) }
+                )
             }
         }
 
@@ -344,19 +377,6 @@ fun CalculatorScreen(
                 onDismiss = viewModel::closeBigNumberViewer
             )
         }
-
-        if (state.isVoiceInputDialogOpen) {
-            VoiceMathInputDialog(
-                angleUnit = state.angleUnit,
-                onInsertExpression = { expr ->
-                    viewModel.applyVoiceExpression(expr, evaluateImmediately = false)
-                },
-                onEvaluateExpression = { expr ->
-                    viewModel.applyVoiceExpression(expr, evaluateImmediately = true)
-                },
-                onDismiss = { viewModel.setVoiceInputDialogOpen(false) }
-            )
-        }
     }
 }
 
@@ -364,10 +384,12 @@ fun CalculatorScreen(
 private fun ScientificToggleStrip(
     isExpanded: Boolean,
     onToggle: () -> Unit,
-    onQuickPower: () -> Unit,
     onOpenVoiceInput: () -> Unit,
     onOpenCameraScanner: () -> Unit
 ) {
+    val playSound = LocalPlayCalcSound.current
+    val performHaptic = LocalPerformCalcHaptic.current
+
     val arrowRotation by animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
         animationSpec = spring(
@@ -376,17 +398,35 @@ private fun ScientificToggleStrip(
         ),
         label = "scientific_chevron"
     )
+    val fxInteractionSource = remember { MutableInteractionSource() }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        val compactChipTextStyle = MaterialTheme.typography.labelLarge.copy(
+            fontSize = 12.5.sp,
+            lineHeight = 16.sp
+        )
+
+        Box(
+            modifier = Modifier
+                .minimumInteractiveComponentSize()
+                .clickable(
+                    interactionSource = fxInteractionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = {
+                        playSound(com.example.audio.CalcSoundType.OPERATOR)
+                        performHaptic(com.example.audio.CalcSoundType.OPERATOR)
+                        onToggle()
+                    }
+                )
+                .testTag("toggle_scientific_panel"),
+            contentAlignment = Alignment.Center
         ) {
             Surface(
                 shape = CircleShape,
@@ -396,13 +436,12 @@ private fun ScientificToggleStrip(
                     MaterialTheme.colorScheme.surfaceContainerHigh
                 },
                 modifier = Modifier
-                    .minimumInteractiveComponentSize()
+                    .height(31.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = onToggle)
-                    .testTag("toggle_scientific_panel")
+                    .indication(fxInteractionSource, ripple(bounded = true))
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                    modifier = Modifier.padding(horizontal = 15.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -414,11 +453,11 @@ private fun ScientificToggleStrip(
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Text(
                         text = "fx",
-                        style = MaterialTheme.typography.labelLarge,
+                        style = compactChipTextStyle,
                         color = if (isExpanded) {
                             MaterialTheme.colorScheme.onPrimaryContainer
                         } else {
@@ -434,30 +473,8 @@ private fun ScientificToggleStrip(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(14.dp)
                             .rotate(arrowRotation)
-                    )
-                }
-            }
-
-            // Quick exponent (xʸ) pill always accessible without expanding fx
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(CircleShape)
-                    .clickable(onClick = onQuickPower)
-                    .testTag("btn_quick_pow")
-            ) {
-                Box(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.quick_power_label),
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -467,60 +484,169 @@ private fun ScientificToggleStrip(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenVoiceInput)
-                    .testTag("open_voice_input_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Mic,
-                        contentDescription = stringResource(R.string.cd_voice_input),
-                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.voice_input_chip),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+            GlowingActionPill(
+                label = stringResource(R.string.voice_input_chip),
+                icon = Icons.Rounded.Mic,
+                contentDescription = stringResource(R.string.cd_voice_input),
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                glowColor = MaterialTheme.colorScheme.tertiary,
+                testTag = "open_voice_input_button",
+                onClick = {
+                    playSound(com.example.audio.CalcSoundType.OPERATOR)
+                    performHaptic(com.example.audio.CalcSoundType.OPERATOR)
+                    onOpenVoiceInput()
                 }
-            }
+            )
 
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenCameraScanner)
-                    .testTag("open_camera_scanner_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DocumentScanner,
-                        contentDescription = stringResource(R.string.cd_camera_scan),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.camera_scan_chip),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+            GlowingActionPill(
+                label = stringResource(R.string.camera_scan_chip),
+                icon = Icons.Rounded.DocumentScanner,
+                contentDescription = stringResource(R.string.cd_camera_scan),
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                glowColor = MaterialTheme.colorScheme.primary,
+                testTag = "open_camera_scanner_button",
+                onClick = {
+                    playSound(com.example.audio.CalcSoundType.OPERATOR)
+                    performHaptic(com.example.audio.CalcSoundType.OPERATOR)
+                    onOpenCameraScanner()
                 }
+            )
+        }
+    }
+}
+
+@Composable
+private fun GlowingActionPill(
+    label: String,
+    icon: ImageVector,
+    contentDescription: String,
+    containerColor: Color,
+    contentColor: Color,
+    glowColor: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "pill_press_scale"
+    )
+    val glowPulse = remember { Animatable(0f) }
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            glowPulse.snapTo(1f)
+        } else if (glowPulse.value > 0f) {
+            glowPulse.animateTo(0f, tween(340, easing = FastOutSlowInEasing))
+        }
+    }
+
+    val surfaceBg = MaterialTheme.colorScheme.surface
+    val isDark = remember(surfaceBg) { surfaceBg.luminance() < 0.5f }
+    val softGlowColor = remember(glowColor, isDark) {
+        if (isDark) lerp(glowColor, Color.White, 0.22f) else glowColor
+    }
+    val innerTintColor = remember(glowColor, isDark) {
+        lerp(glowColor, Color.White, if (isDark) 0.45f else 0.58f)
+    }
+
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .height(31.dp)
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                }
+                .drawBehind {
+                    val pulse = maxOf(glowPulse.value, if (isPressed) 0.7f else 0f)
+                    val baseAlpha = (if (isDark) 0.28f else 0.22f) + pulse * 0.18f
+                    val maxSpreadPx = (4.dp + (pulse * 2f).dp).toPx()
+                    val halfH = size.height / 2f
+                    val steps = 5
+                    for (i in steps downTo 1) {
+                        val t = i.toFloat() / steps.toFloat()
+                        val expand = maxSpreadPx * t
+                        val layerAlpha = baseAlpha * (1f - t * 0.70f) * 0.34f
+                        val corner = halfH + expand
+                        drawRoundRect(
+                            color = softGlowColor.copy(alpha = layerAlpha),
+                            topLeft = Offset(-expand, -expand),
+                            size = Size(size.width + expand * 2f, size.height + expand * 2f),
+                            cornerRadius = CornerRadius(corner, corner)
+                        )
+                    }
+                }
+                .clip(CircleShape)
+                .background(containerColor)
+                .indication(interactionSource, ripple(bounded = true))
+                .drawBehind {
+                    val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
+                    val topSheenAlpha = 0.14f + pulse * 0.12f
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0.0f to innerTintColor.copy(alpha = topSheenAlpha),
+                            0.55f to innerTintColor.copy(alpha = topSheenAlpha * 0.28f),
+                            1.0f to Color.Transparent
+                        )
+                    )
+                    val strokePx = 1.dp.toPx()
+                    val cornerPx = (size.height / 2f).coerceAtLeast(0f)
+                    drawRoundRect(
+                        brush = Brush.verticalGradient(
+                            0.0f to innerTintColor.copy(alpha = 0.36f + pulse * 0.22f),
+                            1.0f to softGlowColor.copy(alpha = 0.12f + pulse * 0.12f)
+                        ),
+                        topLeft = Offset(strokePx / 2f, strokePx / 2f),
+                        size = Size(
+                            (size.width - strokePx).coerceAtLeast(0f),
+                            (size.height - strokePx).coerceAtLeast(0f)
+                        ),
+                        cornerRadius = CornerRadius(
+                            (cornerPx - strokePx / 2f).coerceAtLeast(0f),
+                            (cornerPx - strokePx / 2f).coerceAtLeast(0f)
+                        ),
+                        style = Stroke(width = strokePx)
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = contentColor,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontSize = 12.5.sp,
+                        lineHeight = 16.sp
+                    ),
+                    color = contentColor
+                )
             }
         }
     }

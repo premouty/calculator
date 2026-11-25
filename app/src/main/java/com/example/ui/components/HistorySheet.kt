@@ -146,7 +146,7 @@ fun FullHistoryBottomSheet(
                         .fillMaxWidth()
                         .heightIn(max = 520.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 24.dp)
+                    contentPadding = PaddingValues(top = 6.dp, bottom = 24.dp)
                 ) {
                     groupedHistory.forEach { (groupTitle, itemsInGroup) ->
                         item(key = "header_$groupTitle") {
@@ -333,7 +333,7 @@ private fun HistoryRecordCard(
 
                 Text(
                     text = "= ${record.formattedResult}",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.primary,
                     textAlign = TextAlign.End,
                     maxLines = 1,

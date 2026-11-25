@@ -4,16 +4,21 @@
     <string name="cd_theme_button">Перемкнути тему оформлення</string>
     <string name="cd_sound_toggle">Увімкнути або вимкнути звук клавіш</string>
     <string name="cd_vibration_toggle">Увімкнути або вимкнути вібрацію клавіш</string>
+    <string name="cd_feedback_toggle">Налаштування звуку та вібрації</string>
+    <string name="feedback_sound_label">Звук клавіш</string>
+    <string name="feedback_vibration_label">Вібрація клавіш</string>
     <string name="cd_scientific_toggle">Розгорнути або згорнути наукову панель</string>
     <string name="cd_backspace">Видалити останній символ</string>
     <string name="cd_pull_handle">Потягніть вниз для швидкої історії</string>
     <string name="cd_copy_result">Скопіювати результат</string>
+    <string name="cd_copy_display">Копіювати число або вираз</string>
     <string name="cd_delete_record">Видалити запис</string>
     <string name="cd_close">Закрити</string>
 
     <string name="history_title">Історія обчислень</string>
     <string name="history_quick_title">Останні обчислення</string>
     <string name="history_view_all">Уся історія</string>
+    <string name="history_collapse">Згорнути</string>
     <string name="history_empty_title">Історія поки порожня</string>
     <string name="history_empty_subtitle">Виконані обчислення автоматично з’являться тут</string>
     <string name="history_clear_all">Очистити все</string>
@@ -34,11 +39,11 @@
     <string name="theme_dark">Темна</string>
 
     <string name="copied_snackbar">Скопійовано в буфер обміну</string>
+
     <string name="big_number_full_title">Повне значення числа</string>
     <string name="big_number_digits_count">%1$d знаків</string>
     <string name="tap_for_full_number">Натисніть для повного числа</string>
-    <string name="big_number_mode_grouped">Блоками</string>
-    <string name="big_number_mode_raw">Суцільно</string>
+    <string name="big_number_copy_button">Копіювати число</string>
 
     <string name="error_division_by_zero">Ділення на нуль неможливе</string>
     <string name="error_domain">Поза областю визначення</string>
@@ -69,7 +74,7 @@
     <string name="camera_permission_grant">Надати доступ</string>
     <string name="camera_permission_settings">Відкрити налаштування</string>
 
-    <string name="easter_egg_liza">Я люблю Лізу❤️</string>
+    <string name="easter_egg_liza">я люблю лізу🩷</string>
 
     <string name="camera_scan_ai_analyzing">ШІ аналізує фото…</string>
     <string name="camera_scan_ai_badge">ШІ</string>
@@ -79,8 +84,6 @@
     <string name="camera_scan_mode_fast">Швидко</string>
     <string name="camera_scan_ai_error_title">Помилка ШІ-аналізу</string>
 
-    <string name="cd_quick_power">Піднести до степеня</string>
-    <string name="quick_power_label">xʸ</string>
 
     <string name="cd_voice_input">Голосове введення</string>
     <string name="voice_input_chip">Голос</string>

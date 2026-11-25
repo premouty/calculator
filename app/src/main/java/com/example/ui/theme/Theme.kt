@@ -2,9 +2,6 @@ package com.example.ui.theme
 
 import android.app.Activity
 import android.os.Build
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -14,8 +11,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -104,20 +100,20 @@ fun ExpressiveCalcTheme(
         ThemeMode.DARK -> true
     }
 
-    val rawColorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) {
-                dynamicDarkColorScheme(context)
-            } else {
-                softenDynamicLightScheme(dynamicLightColorScheme(context))
+    val context = LocalContext.current
+    val colorScheme = remember(darkTheme, dynamicColor, context) {
+        when {
+            dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                if (darkTheme) {
+                    dynamicDarkColorScheme(context)
+                } else {
+                    softenDynamicLightScheme(dynamicLightColorScheme(context))
+                }
             }
+            darkTheme -> ExpressiveDarkColorScheme
+            else -> ExpressiveLightColorScheme
         }
-        darkTheme -> ExpressiveDarkColorScheme
-        else -> ExpressiveLightColorScheme
     }
-
-    val animatedColorScheme = rememberAnimatedColorScheme(rawColorScheme)
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -132,7 +128,7 @@ fun ExpressiveCalcTheme(
     }
 
     MaterialTheme(
-        colorScheme = animatedColorScheme,
+        colorScheme = colorScheme,
         typography = CalculatorTypography,
         content = content
     )
@@ -161,56 +157,3 @@ private fun softenDynamicLightScheme(base: ColorScheme): ColorScheme {
         surfaceContainerHighest = lerp(base.surfaceContainerHighest, base.surfaceVariant, 0.48f)
     )
 }
-
-@Composable
-private fun animateThemeColor(target: Color, label: String): Color {
-    val animated by animateColorAsState(
-        targetValue = target,
-        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
-        label = label
-    )
-    return animated
-}
-
-@Composable
-private fun rememberAnimatedColorScheme(target: ColorScheme): ColorScheme {
-    return target.copy(
-        primary = animateThemeColor(target.primary, "primary"),
-        onPrimary = animateThemeColor(target.onPrimary, "onPrimary"),
-        primaryContainer = animateThemeColor(target.primaryContainer, "primaryContainer"),
-        onPrimaryContainer = animateThemeColor(target.onPrimaryContainer, "onPrimaryContainer"),
-        inversePrimary = animateThemeColor(target.inversePrimary, "inversePrimary"),
-        secondary = animateThemeColor(target.secondary, "secondary"),
-        onSecondary = animateThemeColor(target.onSecondary, "onSecondary"),
-        secondaryContainer = animateThemeColor(target.secondaryContainer, "secondaryContainer"),
-        onSecondaryContainer = animateThemeColor(target.onSecondaryContainer, "onSecondaryContainer"),
-        tertiary = animateThemeColor(target.tertiary, "tertiary"),
-        onTertiary = animateThemeColor(target.onTertiary, "onTertiary"),
-        tertiaryContainer = animateThemeColor(target.tertiaryContainer, "tertiaryContainer"),
-        onTertiaryContainer = animateThemeColor(target.onTertiaryContainer, "onTertiaryContainer"),
-        background = animateThemeColor(target.background, "background"),
-        onBackground = animateThemeColor(target.onBackground, "onBackground"),
-        surface = animateThemeColor(target.surface, "surface"),
-        onSurface = animateThemeColor(target.onSurface, "onSurface"),
-        surfaceVariant = animateThemeColor(target.surfaceVariant, "surfaceVariant"),
-        onSurfaceVariant = animateThemeColor(target.onSurfaceVariant, "onSurfaceVariant"),
-        surfaceTint = animateThemeColor(target.surfaceTint, "surfaceTint"),
-        inverseSurface = animateThemeColor(target.inverseSurface, "inverseSurface"),
-        inverseOnSurface = animateThemeColor(target.inverseOnSurface, "inverseOnSurface"),
-        error = animateThemeColor(target.error, "error"),
-        onError = animateThemeColor(target.onError, "onError"),
-        errorContainer = animateThemeColor(target.errorContainer, "errorContainer"),
-        onErrorContainer = animateThemeColor(target.onErrorContainer, "onErrorContainer"),
-        outline = animateThemeColor(target.outline, "outline"),
-        outlineVariant = animateThemeColor(target.outlineVariant, "outlineVariant"),
-        scrim = animateThemeColor(target.scrim, "scrim"),
-        surfaceBright = animateThemeColor(target.surfaceBright, "surfaceBright"),
-        surfaceDim = animateThemeColor(target.surfaceDim, "surfaceDim"),
-        surfaceContainer = animateThemeColor(target.surfaceContainer, "surfaceContainer"),
-        surfaceContainerHigh = animateThemeColor(target.surfaceContainerHigh, "surfaceContainerHigh"),
-        surfaceContainerHighest = animateThemeColor(target.surfaceContainerHighest, "surfaceContainerHighest"),
-        surfaceContainerLow = animateThemeColor(target.surfaceContainerLow, "surfaceContainerLow"),
-        surfaceContainerLowest = animateThemeColor(target.surfaceContainerLowest, "surfaceContainerLowest")
-    )
-}
-

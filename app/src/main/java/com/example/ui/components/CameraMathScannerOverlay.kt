@@ -14,6 +14,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.net.Uri
 import android.provider.Settings
+import android.util.Size as AndroidSize
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +22,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
@@ -148,6 +151,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 private val DefaultCameraScanZone = Rect(left = 0.06f, top = 0.20f, right = 0.94f, bottom = 0.64f)
@@ -327,6 +331,7 @@ private fun CameraPhotoCaptureAndSelectFlow(
             kotlin.math.abs(scanZone.bottom - DefaultCameraScanZone.bottom) > 0.015f
     }
 
+    val isDisposed = remember { AtomicBoolean(false) }
     val textRecognizer = remember {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
@@ -336,16 +341,44 @@ private fun CameraPhotoCaptureAndSelectFlow(
             cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
             isPinchToZoomEnabled = true
             isTapToFocusEnabled = true
+            imageCaptureMode = ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+            imageCaptureResolutionSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        AndroidSize(1920, 1440),
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                    )
+                )
+                .build()
             setEnabledUseCases(CameraController.IMAGE_CAPTURE)
         }
     }
 
+    LaunchedEffect(cameraController) {
+        cameraController.initializationFuture.addListener(
+            {
+                if (isDisposed.get()) return@addListener
+                runCatching {
+                    val hasBack = cameraController.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)
+                    if (!hasBack && cameraController.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
+                        cameraController.cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+                    }
+                }
+            },
+            ContextCompat.getMainExecutor(context)
+        )
+    }
+
     DisposableEffect(cameraController, lifecycleOwner) {
-        cameraController.bindToLifecycle(lifecycleOwner)
+        isDisposed.set(false)
+        runCatching {
+            cameraController.bindToLifecycle(lifecycleOwner)
+        }
         onDispose {
-            cameraController.unbind()
-            textRecognizer.close()
-            captureExecutor.shutdown()
+            isDisposed.set(true)
+            runCatching { cameraController.unbind() }
+            runCatching { textRecognizer.close() }
+            runCatching { captureExecutor.shutdown() }
         }
     }
 
@@ -395,52 +428,92 @@ private fun CameraPhotoCaptureAndSelectFlow(
             )
         }
 
-        captureExecutor.execute {
-            val (enhancedBitmap, scaleFactor) = prepareBitmapForOfflineOcr(bitmap)
-            val enhancedImage = InputImage.fromBitmap(enhancedBitmap, 0)
-            textRecognizer.process(enhancedImage)
-                .addOnSuccessListener(mainExecutor) { enhancedVision ->
-                    val enhancedExprs = extractFromVisionText(enhancedVision, scaleFactor)
-                    if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
-                        enhancedBitmap.recycle()
+        if (isDisposed.get() || bitmap.isRecycled) {
+            isProcessingCapture = false
+        } else {
+            val scheduled = runCatching {
+                captureExecutor.execute {
+                    if (isDisposed.get() || bitmap.isRecycled) {
+                        mainExecutor.execute { isProcessingCapture = false }
+                        return@execute
                     }
-                    if (enhancedExprs.isNotEmpty()) {
-                        onSetOfflineResult(enhancedExprs)
-                        selectedExpressionId = enhancedExprs.firstOrNull()?.id
-                        isProcessingCapture = false
-                    } else {
-                        // Second pass on untouched original bitmap in case contrast clipped faint ink
-                        textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
-                            .addOnSuccessListener(mainExecutor) { rawVision ->
-                                val rawExprs = extractFromVisionText(rawVision, 1f)
-                                onSetOfflineResult(rawExprs)
-                                selectedExpressionId = rawExprs.firstOrNull()?.id
-                                isProcessingCapture = false
+                    val (enhancedBitmap, scaleFactor) = runCatching {
+                        prepareBitmapForOfflineOcr(bitmap)
+                    }.getOrElse { bitmap to 1f }
+
+                    if (isDisposed.get() || bitmap.isRecycled) {
+                        if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                            enhancedBitmap.recycle()
+                        }
+                        mainExecutor.execute { isProcessingCapture = false }
+                        return@execute
+                    }
+
+                    val processRawPass: () -> Unit = {
+                        if (isDisposed.get() || bitmap.isRecycled) {
+                            mainExecutor.execute { isProcessingCapture = false }
+                        } else {
+                            runCatching {
+                                textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
+                                    .addOnSuccessListener(mainExecutor) { rawVision ->
+                                        if (isDisposed.get()) return@addOnSuccessListener
+                                        val rawExprs = extractFromVisionText(rawVision, 1f)
+                                        onSetOfflineResult(rawExprs)
+                                        selectedExpressionId = rawExprs.firstOrNull()?.id
+                                        isProcessingCapture = false
+                                    }
+                                    .addOnFailureListener(mainExecutor) {
+                                        if (isDisposed.get()) return@addOnFailureListener
+                                        onSetOfflineResult(emptyList())
+                                        selectedExpressionId = null
+                                        isProcessingCapture = false
+                                    }
+                            }.onFailure {
+                                mainExecutor.execute {
+                                    if (!isDisposed.get()) {
+                                        onSetOfflineResult(emptyList())
+                                        selectedExpressionId = null
+                                    }
+                                    isProcessingCapture = false
+                                }
+                            }
+                        }
+                    }
+
+                    runCatching {
+                        val enhancedImage = InputImage.fromBitmap(enhancedBitmap, 0)
+                        textRecognizer.process(enhancedImage)
+                            .addOnSuccessListener(mainExecutor) { enhancedVision ->
+                                if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                                    enhancedBitmap.recycle()
+                                }
+                                if (isDisposed.get()) return@addOnSuccessListener
+                                val enhancedExprs = extractFromVisionText(enhancedVision, scaleFactor)
+                                if (enhancedExprs.isNotEmpty()) {
+                                    onSetOfflineResult(enhancedExprs)
+                                    selectedExpressionId = enhancedExprs.firstOrNull()?.id
+                                    isProcessingCapture = false
+                                } else {
+                                    processRawPass()
+                                }
                             }
                             .addOnFailureListener(mainExecutor) {
-                                onSetOfflineResult(emptyList())
-                                selectedExpressionId = null
-                                isProcessingCapture = false
+                                if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                                    enhancedBitmap.recycle()
+                                }
+                                processRawPass()
                             }
+                    }.onFailure {
+                        if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
+                            enhancedBitmap.recycle()
+                        }
+                        processRawPass()
                     }
                 }
-                .addOnFailureListener(mainExecutor) {
-                    if (enhancedBitmap !== bitmap && !enhancedBitmap.isRecycled) {
-                        enhancedBitmap.recycle()
-                    }
-                    textRecognizer.process(InputImage.fromBitmap(bitmap, 0))
-                        .addOnSuccessListener(mainExecutor) { rawVision ->
-                            val rawExprs = extractFromVisionText(rawVision, 1f)
-                            onSetOfflineResult(rawExprs)
-                            selectedExpressionId = rawExprs.firstOrNull()?.id
-                            isProcessingCapture = false
-                        }
-                        .addOnFailureListener(mainExecutor) {
-                            onSetOfflineResult(emptyList())
-                            selectedExpressionId = null
-                            isProcessingCapture = false
-                        }
-                }
+            }
+            if (scheduled.isFailure) {
+                isProcessingCapture = false
+            }
         }
     }
 
@@ -460,7 +533,7 @@ private fun CameraPhotoCaptureAndSelectFlow(
     }
 
     val takePhoto: () -> Unit = {
-        if (!isProcessingCapture && capturedBitmap == null) {
+        if (!isProcessingCapture && capturedBitmap == null && !isDisposed.get()) {
             isProcessingCapture = true
             captureErrorResId = null
             playSound(CalcSoundType.OPERATOR)
@@ -469,64 +542,79 @@ private fun CameraPhotoCaptureAndSelectFlow(
             val zoneSnapshot = latestEffectiveScanZone
             val viewportSnapshot = latestViewportSize
             val mainExecutor = ContextCompat.getMainExecutor(context)
-            cameraController.takePicture(
-                captureExecutor,
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(image: ImageProxy) {
-                        val processedBitmap: Bitmap? = try {
-                            val rotationDegrees = image.imageInfo.rotationDegrees
-                            val crop = image.cropRect
-                            val rawBitmap = image.toBitmap()
-                            val upright = cropAndRotateBitmap(rawBitmap, crop, rotationDegrees)
-                            if (upright !== rawBitmap) rawBitmap.recycle()
+            val captureCall = runCatching {
+                cameraController.takePicture(
+                    captureExecutor,
+                    object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: ImageProxy) {
+                            val processedBitmap: Bitmap? = try {
+                                if (isDisposed.get()) {
+                                    null
+                                } else {
+                                    val rotationDegrees = image.imageInfo.rotationDegrees
+                                    val crop = image.cropRect
+                                    val rawBitmap = image.toBitmap()
+                                    val upright = cropAndRotateBitmap(rawBitmap, crop, rotationDegrees)
+                                    if (upright !== rawBitmap) rawBitmap.recycle()
 
-                            val viewportMatched = cropToViewport(
-                                bitmap = upright,
-                                viewportSize = viewportSnapshot
-                            )
-                            if (viewportMatched !== upright) upright.recycle()
+                                    val viewportMatched = cropToViewport(
+                                        bitmap = upright,
+                                        viewportSize = viewportSnapshot
+                                    )
+                                    if (viewportMatched !== upright) upright.recycle()
 
-                            val zoneCropped = cropToNormalizedZoneAndScale(
-                                bitmap = viewportMatched,
-                                normalizedZone = zoneSnapshot,
-                                maxDimension = 1920
-                            )
-                            if (zoneCropped !== viewportMatched) viewportMatched.recycle()
-                            zoneCropped
-                        } catch (_: Throwable) {
-                            null
-                        } finally {
-                            image.close()
-                        }
+                                    val zoneCropped = cropToNormalizedZoneAndScale(
+                                        bitmap = viewportMatched,
+                                        normalizedZone = zoneSnapshot,
+                                        maxDimension = 1920
+                                    )
+                                    if (zoneCropped !== viewportMatched) viewportMatched.recycle()
+                                    zoneCropped
+                                }
+                            } catch (_: Throwable) {
+                                null
+                            } finally {
+                                runCatching { image.close() }
+                            }
 
-                        if (processedBitmap == null) {
                             mainExecutor.execute {
+                                if (isDisposed.get()) {
+                                    if (processedBitmap != null && !processedBitmap.isRecycled) {
+                                        processedBitmap.recycle()
+                                    }
+                                    return@execute
+                                }
+                                if (processedBitmap == null || processedBitmap.isRecycled) {
+                                    isProcessingCapture = false
+                                    captureErrorResId = R.string.camera_scan_capture_error
+                                    return@execute
+                                }
+                                capturedBitmap = processedBitmap
+                                selectedExpressionId = null
                                 isProcessingCapture = false
-                                captureErrorResId = R.string.camera_scan_capture_error
+                                if (latestUseAiMode) {
+                                    onAnalyzeWithAi(processedBitmap)
+                                } else {
+                                    runOfflineMlKit(processedBitmap)
+                                }
                             }
-                            return
                         }
 
-                        mainExecutor.execute {
-                            capturedBitmap = processedBitmap
-                            selectedExpressionId = null
-                            isProcessingCapture = false
-                            if (latestUseAiMode) {
-                                onAnalyzeWithAi(processedBitmap)
-                            } else {
-                                runOfflineMlKit(processedBitmap)
+                        override fun onError(exception: ImageCaptureException) {
+                            mainExecutor.execute {
+                                if (!isDisposed.get()) {
+                                    isProcessingCapture = false
+                                    captureErrorResId = R.string.camera_scan_capture_error
+                                }
                             }
                         }
                     }
-
-                    override fun onError(exception: ImageCaptureException) {
-                        mainExecutor.execute {
-                            isProcessingCapture = false
-                            captureErrorResId = R.string.camera_scan_capture_error
-                        }
-                    }
-                }
-            )
+                )
+            }
+            if (captureCall.isFailure) {
+                isProcessingCapture = false
+                captureErrorResId = R.string.camera_scan_capture_error
+            }
         }
     }
 

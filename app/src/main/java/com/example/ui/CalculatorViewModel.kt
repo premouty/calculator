@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import android.graphics.Bitmap
 import android.util.Log
+import android.view.View
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.CameraMathAiAnalyzer
@@ -51,6 +52,7 @@ data class CalculatorUiState(
     val rawExpression: String = "",
     val formattedExpression: String = "",
     val livePreview: String = "",
+    val livePreviewPlain: String = "",
     val lastCompletedExpression: String = "",
     val activeResultMeta: FormattedNumber? = null,
     val isResultDisplayed: Boolean = false,
@@ -82,17 +84,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _state = MutableStateFlow(CalculatorUiState())
     private val _rawExpression = MutableStateFlow("")
+    private val _optimisticThemeMode = MutableStateFlow<ThemeMode?>(null)
     private var evalJob: Job? = null
     private var cameraAiJob: Job? = null
 
     val uiState: StateFlow<CalculatorUiState> = combine(
         _state,
         historyRepository.historyStream,
-        prefsRepository.preferencesFlow
-    ) { state, history, prefs ->
+        prefsRepository.preferencesFlow,
+        _optimisticThemeMode
+    ) { state, history, prefs, optimisticTheme ->
         state.copy(
             history = history,
-            themeMode = prefs.themeMode,
+            themeMode = optimisticTheme ?: prefs.themeMode,
             angleUnit = prefs.angleUnit,
             isScientificExpanded = prefs.isScientificExpanded,
             isSoundEnabled = prefs.isSoundEnabled,
@@ -108,8 +112,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         soundEngine.play(type, uiState.value.isSoundEnabled)
     }
 
-    fun performHaptic(type: CalcSoundType) {
-        calcVibrator.vibrate(type, uiState.value.isVibrationEnabled)
+    fun performHaptic(type: CalcSoundType, view: View? = null) {
+        calcVibrator.vibrate(type, uiState.value.isVibrationEnabled, view)
     }
 
     override fun onCleared() {
@@ -325,6 +329,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 rawExpression = "",
                 formattedExpression = "",
                 livePreview = "",
+                livePreviewPlain = "",
                 lastCompletedExpression = "",
                 activeResultMeta = null,
                 isResultDisplayed = false,
@@ -369,6 +374,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                             rawExpression = result.formatted.plainText,
                             formattedExpression = result.formatted.displayText,
                             livePreview = "",
+                            livePreviewPlain = "",
                             lastCompletedExpression = formattedExpr,
                             activeResultMeta = result.formatted,
                             isResultDisplayed = true,
@@ -405,9 +411,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             ThemeMode.LIGHT -> ThemeMode.DARK
             ThemeMode.DARK -> ThemeMode.SYSTEM
         }
-        viewModelScope.launch {
-            prefsRepository.setThemeMode(next)
-        }
+        setThemeMode(next)
     }
 
     fun toggleSoundEnabled() {
@@ -417,10 +421,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun toggleVibrationEnabled() {
+    fun toggleVibrationEnabled(view: View? = null) {
         val next = !uiState.value.isVibrationEnabled
         if (next) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true)
+            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, view = view)
         }
         viewModelScope.launch {
             prefsRepository.setVibrationEnabled(next)
@@ -428,8 +432,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun setThemeMode(mode: ThemeMode) {
+        _optimisticThemeMode.value = mode
         viewModelScope.launch {
             prefsRepository.setThemeMode(mode)
+            _optimisticThemeMode.compareAndSet(mode, null)
         }
     }
 
@@ -519,12 +525,12 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "AI math photo analysis failed", e)
+            } catch (t: Throwable) {
+                Log.e(TAG, "AI math photo analysis failed", t)
                 _state.update {
                     it.copy(
                         cameraScanAnalysisState = CameraScanAnalysisState.Error(
-                            e.localizedMessage ?: "Не вдалося виконати ШІ-аналіз фото."
+                            t.localizedMessage ?: "Не вдалося виконати ШІ-аналіз фото."
                         )
                     )
                 }
@@ -627,6 +633,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                     rawExpression = "",
                     formattedExpression = "",
                     livePreview = "",
+                    livePreviewPlain = "",
                     isResultDisplayed = isResult,
                     activeResultMeta = if (isResult) it.activeResultMeta else null,
                     errorType = null,
@@ -638,15 +645,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
         if (!isHeavyExpression(newRaw)) {
             evalJob?.cancel()
-            val preview = when (val res = ExpressionEvaluator.evaluate(newRaw, angle)) {
-                is EvaluationResult.Success -> res.formatted.displayText
-                else -> ""
+            val (preview, previewPlain) = when (val res = ExpressionEvaluator.evaluate(newRaw, angle)) {
+                is EvaluationResult.Success -> res.formatted.displayText to res.formatted.plainText
+                else -> "" to ""
             }
             _state.update {
                 it.copy(
                     rawExpression = newRaw,
                     formattedExpression = formatted,
                     livePreview = preview,
+                    livePreviewPlain = previewPlain,
                     isResultDisplayed = isResult,
                     activeResultMeta = if (isResult) it.activeResultMeta else null,
                     errorType = null
@@ -669,26 +677,26 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private fun recalculateLivePreview(expr: String, angleUnit: AngleUnit) {
         evalJob?.cancel()
         if (expr.isEmpty()) {
-            _state.update { it.copy(livePreview = "") }
+            _state.update { it.copy(livePreview = "", livePreviewPlain = "") }
             return
         }
         if (!isHeavyExpression(expr)) {
-            val preview = when (val res = ExpressionEvaluator.evaluate(expr, angleUnit)) {
-                is EvaluationResult.Success -> res.formatted.displayText
-                else -> ""
+            val (preview, previewPlain) = when (val res = ExpressionEvaluator.evaluate(expr, angleUnit)) {
+                is EvaluationResult.Success -> res.formatted.displayText to res.formatted.plainText
+                else -> "" to ""
             }
-            _state.update { it.copy(livePreview = preview) }
+            _state.update { it.copy(livePreview = preview, livePreviewPlain = previewPlain) }
             return
         }
         evalJob = viewModelScope.launch {
             val res = withContext(Dispatchers.Default) {
                 ExpressionEvaluator.evaluate(expr, angleUnit)
             }
-            val preview = when (res) {
-                is EvaluationResult.Success -> res.formatted.displayText
-                else -> ""
+            val (preview, previewPlain) = when (res) {
+                is EvaluationResult.Success -> res.formatted.displayText to res.formatted.plainText
+                else -> "" to ""
             }
-            _state.update { it.copy(livePreview = preview) }
+            _state.update { it.copy(livePreview = preview, livePreviewPlain = previewPlain) }
         }
     }
 

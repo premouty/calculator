@@ -17,14 +17,18 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -38,11 +42,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.BrightnessAuto
@@ -56,10 +62,13 @@ import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
@@ -67,19 +76,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -87,11 +112,73 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.audio.CalcSoundType
 import com.example.data.local.CalculationRecord
 import com.example.domain.math.MathErrorType
 import com.example.ui.CalculatorUiState
 import com.example.ui.theme.ThemeMode
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.random.Random
+
+private val LIZA_DATE_REGEX = Regex("(?<![\\d.])28\\.09(?![\\d])")
+
+private enum class ParticleShape {
+    HEART,
+    SPARKLE,
+    DOT
+}
+
+private data class LizaParticle(
+    val angleRad: Float,
+    val distanceDp: Float,
+    val sizeDp: Float,
+    val liftDp: Float,
+    val rotationDeg: Float,
+    val delayFraction: Float,
+    val color: Color,
+    val shape: ParticleShape
+)
+
+private fun buildLizaParticles(): List<LizaParticle> {
+    val palette = listOf(
+        Color(0xFFFF4D8D),
+        Color(0xFFFF77A9),
+        Color(0xFFFFA6C9),
+        Color(0xFFF43F5E),
+        Color(0xFFFFD166),
+        Color(0xFFFF66B2)
+    )
+    val rng = Random(2809)
+    return List(36) { index ->
+        val baseAngle = if (index < 24) {
+            // Upward & outward fan
+            (-168f + (156f * index / 23f)) * (PI.toFloat() / 180f)
+        } else {
+            // 360 degree inner shimmer ring
+            ((index - 24) * 30f + rng.nextFloat() * 18f) * (PI.toFloat() / 180f)
+        }
+        LizaParticle(
+            angleRad = baseAngle + (rng.nextFloat() - 0.5f) * 0.24f,
+            distanceDp = if (index < 24) 76f + rng.nextFloat() * 140f else 36f + rng.nextFloat() * 58f,
+            sizeDp = 4.5f + rng.nextFloat() * 6.5f,
+            liftDp = 18f + rng.nextFloat() * 42f,
+            rotationDeg = (rng.nextFloat() - 0.5f) * 180f,
+            delayFraction = rng.nextFloat() * 0.16f,
+            color = palette[index % palette.size],
+            shape = when {
+                index % 3 == 0 -> ParticleShape.HEART
+                index % 3 == 1 -> ParticleShape.SPARKLE
+                else -> ParticleShape.DOT
+            }
+        )
+    }
+}
 
 @Composable
 fun CalculatorDisplay(
@@ -99,7 +186,6 @@ fun CalculatorDisplay(
     onToggleTheme: () -> Unit,
     onToggleSound: () -> Unit,
     onToggleVibration: () -> Unit,
-    onToggleAngleUnit: () -> Unit,
     onToggleTopHistory: () -> Unit,
     onSetTopHistoryOpen: (Boolean) -> Unit,
     onOpenFullHistory: () -> Unit,
@@ -110,11 +196,54 @@ fun CalculatorDisplay(
     val scrollState = rememberScrollState()
     val shakeOffset = remember { Animatable(0f) }
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
+    val playSound = LocalPlayCalcSound.current
+    val performHaptic = LocalPerformCalcHaptic.current
 
     val mainDisplayText = state.formattedExpression.ifEmpty { "0" }
+    val errorText = when (state.errorType) {
+        MathErrorType.DIVISION_BY_ZERO -> stringResource(R.string.error_division_by_zero)
+        MathErrorType.DOMAIN_ERROR -> stringResource(R.string.error_domain)
+        MathErrorType.SYNTAX_ERROR -> stringResource(R.string.error_syntax)
+        MathErrorType.OVERFLOW -> stringResource(R.string.error_overflow)
+        null -> null
+    }
 
-    LaunchedEffect(mainDisplayText) {
-        scrollState.scrollTo(scrollState.maxValue)
+    val isLizaEasterEgg = errorText == null &&
+        !state.isResultDisplayed &&
+        LIZA_DATE_REGEX.containsMatchIn(state.rawExpression)
+
+    val lizaParticles = remember { buildLizaParticles() }
+    val particleProgress = remember { Animatable(0f) }
+    var lizaReplayTrigger by remember { mutableIntStateOf(0) }
+    var isLizaCooldown by remember { mutableStateOf(false) }
+    var displayRootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var burstOriginOffset by remember { mutableStateOf<Offset?>(null) }
+
+    LaunchedEffect(isLizaEasterEgg, lizaReplayTrigger) {
+        if (isLizaEasterEgg) {
+            isLizaCooldown = true
+            launch {
+                delay(3000L)
+                isLizaCooldown = false
+            }
+            particleProgress.snapTo(0f)
+            particleProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 1450,
+                    easing = androidx.compose.animation.core.LinearEasing
+                )
+            )
+        } else {
+            isLizaCooldown = false
+            particleProgress.snapTo(0f)
+        }
+    }
+
+    LaunchedEffect(mainDisplayText, scrollState.maxValue) {
+        if (scrollState.maxValue > 0) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
     }
 
     LaunchedEffect(state.errorTriggerId) {
@@ -150,104 +279,92 @@ fun CalculatorDisplay(
                 )
             }
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .onGloballyPositioned { displayRootCoords = it },
+            propagateMinConstraints = true
         ) {
-            // Symmetrical Top Utility Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
+                // Symmetrical Top Utility Bar
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ThemeModeChip(
                         themeMode = state.themeMode,
-                        onClick = onToggleTheme
+                        onClick = {
+                            playSound(CalcSoundType.OPERATOR)
+                            performHaptic(CalcSoundType.OPERATOR)
+                            onToggleTheme()
+                        }
                     )
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier
-                            .height(36.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onToggleAngleUnit)
-                            .testTag("display_angle_chip")
+
+                    // Right utility pills: Unified Sound & Vibration pill + History pill
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.Center
+                        FeedbackTogglePill(
+                            soundEnabled = state.isSoundEnabled,
+                            vibrationEnabled = state.isVibrationEnabled,
+                            onToggleSound = {
+                                performHaptic(CalcSoundType.UTILITY)
+                                onToggleSound()
+                            },
+                            onToggleVibration = {
+                                playSound(CalcSoundType.UTILITY)
+                                onToggleVibration()
+                            },
+                            onQuickToggleAll = {
+                                val turnOnBoth = !state.isSoundEnabled && !state.isVibrationEnabled
+                                if (turnOnBoth || state.isSoundEnabled) onToggleSound()
+                                if (turnOnBoth || state.isVibrationEnabled) onToggleVibration()
+                            }
+                        )
+
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            modifier = Modifier
+                                .height(36.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    playSound(CalcSoundType.OPERATOR)
+                                    performHaptic(CalcSoundType.OPERATOR)
+                                    onOpenFullHistory()
+                                }
+                                .testTag("open_history_modal_button")
                         ) {
-                            AnimatedContent(
-                                targetState = state.angleUnit.name,
-                                transitionSpec = {
-                                    (fadeIn() + slideInVertically { it / 2 }) togetherWith
-                                        (fadeOut() + slideOutVertically { -it / 2 })
-                                },
-                                label = "angle_unit_anim"
-                            ) { unitText ->
-                                Text(
-                                    text = unitText,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.History,
+                                    contentDescription = stringResource(R.string.cd_history_button),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(17.dp)
                                 )
+                                if (state.history.isNotEmpty()) {
+                                    Text(
+                                        text = if (state.history.size > 99) "99+" else state.history.size.toString(),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
                 }
-
-                // Right utility pills: Vibration toggle + Sound toggle + History pill
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    VibrationTogglePill(
-                        enabled = state.isVibrationEnabled,
-                        onClick = onToggleVibration
-                    )
-
-                    SoundTogglePill(
-                        enabled = state.isSoundEnabled,
-                        onClick = onToggleSound
-                    )
-
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier
-                            .height(36.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onOpenFullHistory)
-                            .testTag("open_history_modal_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.History,
-                                contentDescription = stringResource(R.string.cd_history_button),
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(17.dp)
-                            )
-                            if (state.history.isNotEmpty()) {
-                                Text(
-                                    text = if (state.history.size > 99) "99+" else state.history.size.toString(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
 
             // Bottom portion of display: Completed expression, Active display, Preview, Pull handle
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -256,26 +373,18 @@ fun CalculatorDisplay(
                     enter = fadeIn() + slideInVertically { it / 2 },
                     exit = fadeOut() + slideOutVertically { -it / 2 }
                 ) {
-                    Text(
-                        text = "${state.lastCompletedExpression} =",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp)
-                    )
-                }
-
-                val dynamicFontSize = remember(mainDisplayText, compactMode) {
-                    val base = if (compactMode) 44 else 58
-                    when {
-                        mainDisplayText.length <= 8 -> base.sp
-                        mainDisplayText.length <= 12 -> (base - 10).sp
-                        mainDisplayText.length <= 17 -> (base - 18).sp
-                        else -> (base - 24).coerceAtLeast(26).sp
+                    SelectionContainer {
+                        Text(
+                            text = "${state.lastCompletedExpression} =",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                        )
                     }
                 }
 
@@ -289,44 +398,145 @@ fun CalculatorDisplay(
                     label = "display_text_color"
                 )
 
-                Box(
+                val textMeasurer = rememberTextMeasurer()
+                val density = LocalDensity.current
+                val baseDisplayStyle = MaterialTheme.typography.displayLarge
+                val activeFontWeight = if (state.isResultDisplayed) FontWeight.Medium else FontWeight.Normal
+
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = if (compactMode) 2.dp else 8.dp)
                         .offset { IntOffset(shakeOffset.value.roundToInt(), 0) },
                     contentAlignment = Alignment.CenterEnd
                 ) {
+                    val safeAvailableWidthPx = with(density) {
+                        (maxWidth - 6.dp).toPx().coerceAtLeast(1f)
+                    }
+                    val maxFontSp = if (compactMode) 44f else 58f
+                    val minFontSp = if (compactMode) 20f else 24f
+
+                    val dynamicFontSize = remember(
+                        mainDisplayText,
+                        safeAvailableWidthPx,
+                        maxFontSp,
+                        minFontSp,
+                        activeFontWeight,
+                        baseDisplayStyle
+                    ) {
+                        var candidateSp = maxFontSp
+                        val maxWidthMeasured = textMeasurer.measure(
+                            text = mainDisplayText,
+                            style = baseDisplayStyle.copy(
+                                fontSize = candidateSp.sp,
+                                lineHeight = (candidateSp * 1.15f).sp,
+                                letterSpacing = 0.25.sp,
+                                fontWeight = activeFontWeight
+                            ),
+                            maxLines = 1,
+                            softWrap = false
+                        ).size.width.toFloat()
+
+                        if (maxWidthMeasured > safeAvailableWidthPx) {
+                            val ratio = (safeAvailableWidthPx / maxWidthMeasured).coerceIn(0.2f, 1f)
+                            candidateSp = (candidateSp * ratio).coerceIn(minFontSp, maxFontSp)
+                            // Refine slightly so glyphs never clip past the edge when >= minFontSp
+                            var stepDown = 0
+                            while (candidateSp > minFontSp && stepDown < 4) {
+                                val checkWidth = textMeasurer.measure(
+                                    text = mainDisplayText,
+                                    style = baseDisplayStyle.copy(
+                                        fontSize = candidateSp.sp,
+                                        lineHeight = (candidateSp * 1.15f).sp,
+                                        letterSpacing = 0.25.sp,
+                                        fontWeight = activeFontWeight
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false
+                                ).size.width.toFloat()
+                                if (checkWidth <= safeAvailableWidthPx) break
+                                candidateSp = (candidateSp - 1f).coerceAtLeast(minFontSp)
+                                stepDown++
+                            }
+                        }
+                        candidateSp.sp
+                    }
+
+                    val hasHorizontalOverflow = scrollState.maxValue > 0
+                    val fadeLeft = scrollState.value > 0
+                    val fadeRight = scrollState.value < scrollState.maxValue
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (hasHorizontalOverflow && (fadeLeft || fadeRight)) {
+                                    Modifier
+                                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                                        .drawWithContent {
+                                            drawContent()
+                                            val fadePx = 22.dp.toPx().coerceAtMost(size.width * 0.16f)
+                                            if (fadeLeft && fadePx > 0f) {
+                                                drawRect(
+                                                    brush = Brush.horizontalGradient(
+                                                        colors = listOf(Color.Transparent, Color.Black),
+                                                        startX = 0f,
+                                                        endX = fadePx
+                                                    ),
+                                                    size = Size(fadePx, size.height),
+                                                    blendMode = BlendMode.DstIn
+                                                )
+                                            }
+                                            if (fadeRight && fadePx > 0f) {
+                                                drawRect(
+                                                    brush = Brush.horizontalGradient(
+                                                        colors = listOf(Color.Black, Color.Transparent),
+                                                        startX = size.width - fadePx,
+                                                        endX = size.width
+                                                    ),
+                                                    topLeft = Offset(size.width - fadePx, 0f),
+                                                    size = Size(fadePx, size.height),
+                                                    blendMode = BlendMode.DstIn
+                                                )
+                                            }
+                                        }
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .horizontalScroll(scrollState),
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        AnimatedContent(
-                            targetState = state.isResultDisplayed,
-                            transitionSpec = {
-                                if (targetState && !initialState) {
-                                    (slideInVertically { it / 2 } + fadeIn(tween(130))) togetherWith
-                                        (slideOutVertically { -it / 3 } + fadeOut(tween(90)))
-                                } else {
-                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                }
-                            },
-                            label = "main_display_transition"
-                        ) { isRes ->
-                            Text(
-                                text = mainDisplayText,
-                                style = MaterialTheme.typography.displayLarge.copy(
-                                    fontSize = dynamicFontSize,
-                                    lineHeight = dynamicFontSize * 1.15f,
-                                    fontWeight = if (isRes) FontWeight.SemiBold else FontWeight.Medium
-                                ),
-                                color = displayTextColor,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.testTag("calculator_main_display")
-                            )
+                        SelectionContainer {
+                            AnimatedContent(
+                                targetState = state.isResultDisplayed,
+                                transitionSpec = {
+                                    if (targetState && !initialState) {
+                                        (slideInVertically { it / 2 } + fadeIn(tween(130))) togetherWith
+                                            (slideOutVertically { -it / 3 } + fadeOut(tween(90)))
+                                    } else {
+                                        fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                    }
+                                },
+                                label = "main_display_transition"
+                            ) { isRes ->
+                                Text(
+                                    text = mainDisplayText,
+                                    style = baseDisplayStyle.copy(
+                                        fontSize = dynamicFontSize,
+                                        lineHeight = dynamicFontSize * 1.15f,
+                                        letterSpacing = 0.25.sp,
+                                        fontWeight = if (isRes) FontWeight.Medium else FontWeight.Normal
+                                    ),
+                                    color = displayTextColor,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier
+                                        .padding(horizontal = if (hasHorizontalOverflow) 4.dp else 0.dp)
+                                        .testTag("calculator_main_display")
+                                )
+                            }
                         }
                     }
                 }
@@ -380,61 +590,92 @@ fun CalculatorDisplay(
                     }
                 }
 
-                val errorText = when (state.errorType) {
-                    MathErrorType.DIVISION_BY_ZERO -> stringResource(R.string.error_division_by_zero)
-                    MathErrorType.DOMAIN_ERROR -> stringResource(R.string.error_domain)
-                    MathErrorType.SYNTAX_ERROR -> stringResource(R.string.error_syntax)
-                    MathErrorType.OVERFLOW -> stringResource(R.string.error_overflow)
-                    null -> null
-                }
-
-                val isFortyTwoEasterEgg = state.isResultDisplayed &&
-                    state.activeResultMeta?.plainText == "42" &&
-                    errorText == null
-
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 32.dp)
+                        .heightIn(min = 34.dp)
                         .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    when {
-                        errorText != null -> {
-                            Text(
-                                text = errorText,
-                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                color = MaterialTheme.colorScheme.error,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.testTag("calculator_error_text")
-                            )
-                        }
-                        isFortyTwoEasterEgg -> {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.testTag("easter_egg_liza_text")
+                    if (errorText != null) {
+                        Text(
+                            text = errorText,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("calculator_error_text")
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AnimatedVisibility(
+                                visible = isLizaEasterEgg,
+                                enter = fadeIn(tween(180)) + scaleIn(
+                                    initialScale = 0.68f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.55f,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                ),
+                                exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.85f)
                             ) {
-                                Text(
-                                    text = stringResource(R.string.easter_egg_liza),
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+                                val pinkPillColor = lerp(
+                                    MaterialTheme.colorScheme.secondaryContainer,
+                                    Color(0xFFFF69B4),
+                                    0.24f
                                 )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = pinkPillColor,
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .clickable(enabled = !isLizaCooldown) {
+                                            playSound(CalcSoundType.OPERATOR)
+                                            performHaptic(CalcSoundType.OPERATOR)
+                                            lizaReplayTrigger++
+                                        }
+                                        .onGloballyPositioned { pillCoords ->
+                                            val root = displayRootCoords
+                                            if (root != null && root.isAttached && pillCoords.isAttached) {
+                                                val rel = pillCoords.positionInRoot() - root.positionInRoot()
+                                                burstOriginOffset = Offset(
+                                                    x = rel.x + pillCoords.size.width * 0.5f,
+                                                    y = rel.y + pillCoords.size.height * 0.5f
+                                                )
+                                            }
+                                        }
+                                        .testTag("easter_egg_liza_text")
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.easter_egg_liza),
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 5.dp)
+                                    )
+                                }
                             }
-                        }
-                        !state.isResultDisplayed && state.livePreview.isNotEmpty() -> {
-                            Text(
-                                text = "= ${state.livePreview}",
-                                style = MaterialTheme.typography.headlineMedium.copy(fontSize = 24.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.testTag("calculator_live_preview")
-                            )
+
+                            if (!state.isResultDisplayed && state.livePreview.isNotEmpty()) {
+                                SelectionContainer {
+                                    Text(
+                                        text = "= ${state.livePreview}",
+                                        style = MaterialTheme.typography.headlineMedium.copy(
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Normal
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.testTag("calculator_live_preview")
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -454,7 +695,11 @@ fun CalculatorDisplay(
                         .clip(RoundedCornerShape(16.dp))
                         .clickable(
                             enabled = !state.isTopHistoryOpen,
-                            onClick = onToggleTopHistory
+                            onClick = {
+                                playSound(CalcSoundType.UTILITY)
+                                performHaptic(CalcSoundType.UTILITY)
+                                onToggleTopHistory()
+                            }
                         )
                         .padding(top = 6.dp, bottom = 4.dp)
                         .testTag("top_history_pull_handle"),
@@ -475,6 +720,94 @@ fun CalculatorDisplay(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
+                }
+            }
+            }
+
+            // Heart & sparkle particle burst overlay (reads progress only in Draw phase for 120fps)
+            val reusableHeartPath = remember { Path() }
+            Canvas(modifier = Modifier.matchParentSize()) {
+                val p = particleProgress.value
+                if (p <= 0f || p >= 1f) return@Canvas
+
+                val origin = burstOriginOffset ?: Offset(
+                    x = size.width * 0.74f,
+                    y = size.height - 54.dp.toPx()
+                )
+
+                for (particle in lizaParticles) {
+                    val localT = ((p - particle.delayFraction) / (1f - particle.delayFraction))
+                        .coerceIn(0f, 1f)
+                    if (localT <= 0f) continue
+
+                    val easeOut = 1f - (1f - localT).pow(3)
+                    val distPx = particle.distanceDp.dp.toPx() * easeOut
+                    val liftPx = particle.liftDp.dp.toPx() * localT
+                    val cx = origin.x + cos(particle.angleRad) * distPx
+                    val cy = origin.y + sin(particle.angleRad) * distPx - liftPx
+
+                    val alpha = when {
+                        localT < 0.14f -> localT / 0.14f
+                        localT > 0.62f -> ((1f - localT) / 0.38f).coerceIn(0f, 1f)
+                        else -> 1f
+                    }
+                    val scale = when {
+                        localT < 0.16f -> 0.35f + 0.65f * (localT / 0.16f)
+                        else -> 1f - 0.35f * localT
+                    }
+                    val radius = particle.sizeDp.dp.toPx() * scale
+                    val drawColor = particle.color.copy(alpha = alpha * 0.92f)
+
+                    when (particle.shape) {
+                        ParticleShape.DOT -> {
+                            drawCircle(
+                                color = drawColor.copy(alpha = alpha * 0.28f),
+                                radius = radius * 1.7f,
+                                center = Offset(cx, cy)
+                            )
+                            drawCircle(
+                                color = drawColor,
+                                radius = radius * 0.72f,
+                                center = Offset(cx, cy)
+                            )
+                        }
+                        ParticleShape.SPARKLE -> {
+                            rotate(degrees = particle.rotationDeg * localT, pivot = Offset(cx, cy)) {
+                                val arm = radius * 1.25f
+                                val waist = radius * 0.32f
+                                reusableHeartPath.reset()
+                                reusableHeartPath.moveTo(cx, cy - arm)
+                                reusableHeartPath.lineTo(cx + waist, cy - waist)
+                                reusableHeartPath.lineTo(cx + arm, cy)
+                                reusableHeartPath.lineTo(cx + waist, cy + waist)
+                                reusableHeartPath.lineTo(cx, cy + arm)
+                                reusableHeartPath.lineTo(cx - waist, cy + waist)
+                                reusableHeartPath.lineTo(cx - arm, cy)
+                                reusableHeartPath.lineTo(cx - waist, cy - waist)
+                                reusableHeartPath.close()
+                                drawPath(path = reusableHeartPath, color = drawColor)
+                            }
+                        }
+                        ParticleShape.HEART -> {
+                            rotate(degrees = particle.rotationDeg * 0.45f * localT, pivot = Offset(cx, cy)) {
+                                val s = radius * 1.15f
+                                reusableHeartPath.reset()
+                                reusableHeartPath.moveTo(cx, cy + s * 0.85f)
+                                reusableHeartPath.cubicTo(
+                                    cx - s * 1.45f, cy + s * 0.05f,
+                                    cx - s * 0.95f, cy - s * 1.05f,
+                                    cx, cy - s * 0.25f
+                                )
+                                reusableHeartPath.cubicTo(
+                                    cx + s * 0.95f, cy - s * 1.05f,
+                                    cx + s * 1.45f, cy + s * 0.05f,
+                                    cx, cy + s * 0.85f
+                                )
+                                reusableHeartPath.close()
+                                drawPath(path = reusableHeartPath, color = drawColor)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -588,7 +921,7 @@ fun TopPullDownHistoryOverlay(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     if (history.isEmpty()) {
                         Box(
@@ -605,71 +938,77 @@ fun TopPullDownHistoryOverlay(
                             )
                         }
                     } else {
-                        LazyColumn(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f, fill = false),
-                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                                .weight(1f, fill = false)
+                                .clipToBounds()
                         ) {
-                            items(history.take(5), key = { it.id }) { record ->
-                                Surface(
-                                    shape = RoundedCornerShape(14.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .animateItem()
-                                ) {
-                                    Row(
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(top = 2.dp, bottom = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                items(history.take(5), key = { it.id }) { record ->
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .animateItem()
                                     ) {
-                                        IconButton(
-                                            onClick = { onCopyResult(record.plainResult) },
-                                            modifier = Modifier.size(32.dp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.ContentCopy,
-                                                contentDescription = stringResource(R.string.cd_copy_result),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
+                                            IconButton(
+                                                onClick = { onCopyResult(record.plainResult) },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.ContentCopy,
+                                                    contentDescription = stringResource(R.string.cd_copy_result),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
 
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
 
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            horizontalAlignment = Alignment.End
-                                        ) {
-                                            Text(
-                                                text = record.expression,
-                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                textAlign = TextAlign.End,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable { onUseExpression(record) }
-                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
-                                            Text(
-                                                text = "= ${record.formattedResult}",
-                                                style = MaterialTheme.typography.titleMedium.copy(
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                ),
-                                                color = MaterialTheme.colorScheme.primary,
-                                                textAlign = TextAlign.End,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable { onUseResult(record) }
-                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                horizontalAlignment = Alignment.End
+                                            ) {
+                                                Text(
+                                                    text = record.expression,
+                                                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    textAlign = TextAlign.End,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clickable { onUseExpression(record) }
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                                Text(
+                                                    text = "= ${record.formattedResult}",
+                                                    style = MaterialTheme.typography.titleMedium.copy(
+                                                        fontSize = 16.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    textAlign = TextAlign.End,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clickable { onUseResult(record) }
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -677,31 +1016,49 @@ fun TopPullDownHistoryOverlay(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                    )
 
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable(onClick = onDismiss)
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(top = 6.dp, bottom = 2.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
                                 .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.outlineVariant)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Rounded.KeyboardArrowUp,
-                            contentDescription = stringResource(R.string.cd_close),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
+                                .clickable(onClick = onDismiss)
+                                .testTag("top_history_collapse_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(24.dp)
+                                        .height(3.5.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.outlineVariant)
+                                )
+                                Text(
+                                    text = stringResource(R.string.history_collapse),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowUp,
+                                    contentDescription = stringResource(R.string.cd_close),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -709,174 +1066,146 @@ fun TopPullDownHistoryOverlay(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun VibrationTogglePill(
-    enabled: Boolean,
-    onClick: () -> Unit
+private fun FeedbackTogglePill(
+    soundEnabled: Boolean,
+    vibrationEnabled: Boolean,
+    onToggleSound: () -> Unit,
+    onToggleVibration: () -> Unit,
+    onQuickToggleAll: () -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val anyEnabled = soundEnabled || vibrationEnabled
+
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.88f else 1f,
+        targetValue = if (isPressed) 0.90f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "vibration_press_scale"
+        label = "feedback_press_scale"
     )
-    val bgColor by animateColorAsState(
-        targetValue = if (enabled) {
-            MaterialTheme.colorScheme.surfaceContainerHighest
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        animationSpec = tween(durationMillis = 220),
-        label = "vibration_bg"
-    )
-    val iconTint by animateColorAsState(
-        targetValue = if (enabled) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-        },
-        animationSpec = tween(durationMillis = 220),
-        label = "vibration_tint"
-    )
-
-    val wiggleAngle = remember { Animatable(0f) }
-    val pulseScale = remember { Animatable(1f) }
-    var initialized by remember { mutableStateOf(false) }
-
-    LaunchedEffect(enabled) {
-        if (!initialized) {
-            initialized = true
-            return@LaunchedEffect
-        }
-        if (enabled) {
-            pulseScale.animateTo(1.22f, tween(90))
-            for (angle in listOf(-16f, 16f, -10f, 10f, 0f)) {
-                wiggleAngle.animateTo(angle, tween(42))
-            }
-            pulseScale.animateTo(
-                1f,
-                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
-            )
-        } else {
-            pulseScale.animateTo(0.80f, tween(100))
-            pulseScale.animateTo(
-                1f,
-                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
-            )
-        }
+    val bgColor = if (anyEnabled) {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerLow
     }
+    val activeTint = MaterialTheme.colorScheme.primary
+    val inactiveTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
 
-    Surface(
-        shape = CircleShape,
-        color = bgColor,
-        modifier = Modifier
-            .size(36.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+    Box {
+        Surface(
+            shape = CircleShape,
+            color = bgColor,
+            modifier = Modifier
+                .height(36.dp)
+                .graphicsLayer {
+                    scaleX = pressScale
+                    scaleY = pressScale
+                }
+                .clip(CircleShape)
+                .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = ripple(bounded = true),
+                    onClick = { menuExpanded = true },
+                    onLongClick = onQuickToggleAll
+                )
+                .testTag("feedback_mode_toggle")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = if (soundEnabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
+                    contentDescription = stringResource(R.string.cd_feedback_toggle),
+                    tint = if (soundEnabled) activeTint else inactiveTint,
+                    modifier = Modifier.size(16.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(13.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                )
+                Icon(
+                    imageVector = Icons.Rounded.Vibration,
+                    contentDescription = null,
+                    tint = if (vibrationEnabled) activeTint else inactiveTint,
+                    modifier = Modifier.size(16.dp)
+                )
             }
-            .clip(CircleShape)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true),
-                onClick = onClick
-            )
-            .testTag("vibration_mode_toggle")
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = Icons.Rounded.Vibration,
-                contentDescription = stringResource(R.string.cd_vibration_toggle),
-                tint = iconTint,
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(
                 modifier = Modifier
-                    .size(17.dp)
-                    .graphicsLayer {
-                        rotationZ = wiggleAngle.value
-                        scaleX = pulseScale.value
-                        scaleY = pulseScale.value
-                    }
-            )
+                    .widthIn(min = 216.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                FeedbackMenuSwitchRow(
+                    icon = if (soundEnabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
+                    label = stringResource(R.string.feedback_sound_label),
+                    checked = soundEnabled,
+                    onToggle = onToggleSound,
+                    testTag = "feedback_menu_sound_row"
+                )
+                FeedbackMenuSwitchRow(
+                    icon = Icons.Rounded.Vibration,
+                    label = stringResource(R.string.feedback_vibration_label),
+                    checked = vibrationEnabled,
+                    onToggle = onToggleVibration,
+                    testTag = "feedback_menu_vibration_row"
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun SoundTogglePill(
-    enabled: Boolean,
-    onClick: () -> Unit
+private fun FeedbackMenuSwitchRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    checked: Boolean,
+    onToggle: () -> Unit,
+    testTag: String
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.88f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "sound_press_scale"
-    )
-    val bgColor by animateColorAsState(
-        targetValue = if (enabled) {
-            MaterialTheme.colorScheme.surfaceContainerHighest
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        animationSpec = tween(durationMillis = 220),
-        label = "sound_bg"
-    )
-    val iconTint by animateColorAsState(
-        targetValue = if (enabled) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-        },
-        animationSpec = tween(durationMillis = 220),
-        label = "sound_tint"
-    )
-
-    Surface(
-        shape = CircleShape,
-        color = bgColor,
+    Row(
         modifier = Modifier
-            .size(36.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(CircleShape)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = ripple(bounded = true),
-                onClick = onClick
-            )
-            .testTag("sound_mode_toggle")
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            AnimatedContent(
-                targetState = enabled,
-                transitionSpec = {
-                    (fadeIn(tween(180)) + scaleIn(
-                        initialScale = 0.5f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        )
-                    )) togetherWith (fadeOut(tween(120)) + scaleOut(targetScale = 0.5f))
-                },
-                label = "sound_icon_anim"
-            ) { isOn ->
-                Icon(
-                    imageVector = if (isOn) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
-                    contentDescription = stringResource(R.string.cd_sound_toggle),
-                    tint = iconTint,
-                    modifier = Modifier.size(17.dp)
-                )
-            }
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(19.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() }
+        )
     }
 }
 
@@ -901,11 +1230,7 @@ private fun ThemeModeChip(
         ),
         label = "theme_chip_scale"
     )
-    val chipBgColor by animateColorAsState(
-        targetValue = MaterialTheme.colorScheme.surfaceContainerHighest,
-        animationSpec = tween(durationMillis = 300),
-        label = "theme_chip_bg"
-    )
+    val chipBgColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
     Surface(
         shape = CircleShape,
@@ -932,13 +1257,10 @@ private fun ThemeModeChip(
             AnimatedContent(
                 targetState = themeMode,
                 transitionSpec = {
-                    (fadeIn(tween(220)) + scaleIn(
-                        initialScale = 0.55f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        )
-                    )) togetherWith (fadeOut(tween(140)) + scaleOut(targetScale = 0.55f))
+                    (fadeIn(tween(130)) + scaleIn(
+                        initialScale = 0.7f,
+                        animationSpec = tween(130)
+                    )) togetherWith (fadeOut(tween(90)) + scaleOut(targetScale = 0.7f))
                 },
                 label = "theme_icon"
             ) { mode ->
@@ -957,8 +1279,8 @@ private fun ThemeModeChip(
             AnimatedContent(
                 targetState = label,
                 transitionSpec = {
-                    (fadeIn(tween(200)) + slideInVertically { it / 3 }) togetherWith
-                        (fadeOut(tween(130)) + slideOutVertically { -it / 3 })
+                    (fadeIn(tween(130)) + slideInVertically { it / 4 }) togetherWith
+                        (fadeOut(tween(90)) + slideOutVertically { -it / 4 })
                 },
                 label = "theme_label"
             ) { text ->

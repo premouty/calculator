@@ -190,19 +190,24 @@ fun ExpressiveCalcButton(
         label = "button_fg"
     )
 
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val isDark = remember(backgroundColor) { backgroundColor.luminance() < 0.5f }
     val rawGlowColor = when (role) {
         CalcButtonRole.EQUALS -> MaterialTheme.colorScheme.primary
-        CalcButtonRole.UTILITY -> MaterialTheme.colorScheme.tertiary
+        CalcButtonRole.UTILITY -> tertiaryColor
         else -> MaterialTheme.colorScheme.primary
     }
     val softGlowColor = remember(rawGlowColor, isDark) {
         if (isDark) lerp(rawGlowColor, Color.White, 0.18f) else rawGlowColor
     }
-    val innerTintColor = when (role) {
-        CalcButtonRole.EQUALS -> lerp(MaterialTheme.colorScheme.primaryContainer, Color.White, if (isDark) 0.35f else 0.55f)
-        CalcButtonRole.UTILITY -> lerp(MaterialTheme.colorScheme.tertiary, Color.White, if (isDark) 0.40f else 0.65f)
-        else -> Color.White
+    val innerTintColor = remember(role, isDark, primaryContainerColor, tertiaryColor) {
+        when (role) {
+            CalcButtonRole.EQUALS -> lerp(primaryContainerColor, Color.White, if (isDark) 0.35f else 0.55f)
+            CalcButtonRole.UTILITY -> lerp(tertiaryColor, Color.White, if (isDark) 0.40f else 0.65f)
+            else -> Color.White
+        }
     }
 
     val shape = RoundedCornerShape(cornerRadius)
@@ -365,21 +370,21 @@ fun ExpressiveCalcButton(
                     CalcButtonRole.SCIENTIFIC, CalcButtonRole.SCIENTIFIC_ACTIVE ->
                         MaterialTheme.typography.labelLarge.copy(
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Medium
                         )
                     CalcButtonRole.OPERATOR, CalcButtonRole.EQUALS ->
                         MaterialTheme.typography.headlineMedium.copy(
                             fontSize = 24.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Normal
                         )
                     CalcButtonRole.UTILITY ->
                         MaterialTheme.typography.titleMedium.copy(
                             fontSize = 19.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Medium
                         )
                     else ->
                         MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = 23.sp,
+                            fontSize = 25.sp,
                             fontWeight = FontWeight.Normal
                         )
                 }
