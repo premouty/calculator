@@ -1,0 +1,81 @@
+<resources>
+    <string name="app_name">ExpressiveCalc</string>
+    <string name="cd_history_button">Відкрити історію обчислень</string>
+    <string name="cd_theme_button">Перемкнути тему оформлення</string>
+    <string name="cd_sound_toggle">Увімкнути або вимкнути звук клавіш</string>
+    <string name="cd_vibration_toggle">Увімкнути або вимкнути вібрацію клавіш</string>
+    <string name="cd_scientific_toggle">Розгорнути або згорнути наукову панель</string>
+    <string name="cd_backspace">Видалити останній символ</string>
+    <string name="cd_pull_handle">Потягніть вниз для швидкої історії</string>
+    <string name="cd_copy_result">Скопіювати результат</string>
+    <string name="cd_delete_record">Видалити запис</string>
+    <string name="cd_close">Закрити</string>
+
+    <string name="history_title">Історія обчислень</string>
+    <string name="history_quick_title">Останні обчислення</string>
+    <string name="history_view_all">Уся історія</string>
+    <string name="history_empty_title">Історія поки порожня</string>
+    <string name="history_empty_subtitle">Виконані обчислення автоматично з’являться тут</string>
+    <string name="history_clear_all">Очистити все</string>
+    <string name="history_clear_confirm_title">Очистити всю історію?</string>
+    <string name="history_clear_confirm_body">Усі збережені вирази та результати буде видалено з пристрою без можливості відновлення.</string>
+    <string name="action_cancel">Скасувати</string>
+    <string name="action_clear">Очистити</string>
+    <string name="action_use_expression">Вираз</string>
+    <string name="action_use_result">Результат</string>
+    <string name="action_copy">Копіювати</string>
+
+    <string name="group_today">Сьогодні</string>
+    <string name="group_yesterday">Вчора</string>
+    <string name="group_earlier">Раніше</string>
+
+    <string name="theme_system">Системна</string>
+    <string name="theme_light">Світла</string>
+    <string name="theme_dark">Темна</string>
+
+    <string name="copied_snackbar">Скопійовано в буфер обміну</string>
+    <string name="big_number_full_title">Повне значення числа</string>
+    <string name="big_number_digits_count">%1$d знаків</string>
+    <string name="tap_for_full_number">Натисніть для повного числа</string>
+    <string name="big_number_mode_grouped">Блоками</string>
+    <string name="big_number_mode_raw">Суцільно</string>
+
+    <string name="error_division_by_zero">Ділення на нуль неможливе</string>
+    <string name="error_domain">Поза областю визначення</string>
+    <string name="error_syntax">Некоректний вираз</string>
+    <string name="error_overflow">Число занадто велике</string>
+
+    <string name="cd_camera_scan">Сканувати приклад камерою</string>
+    <string name="camera_scan_chip">Скан</string>
+    <string name="camera_scan_title">Сканер прикладів</string>
+    <string name="camera_scan_hint">Наведіть на приклади, змініть рамку за потреби та зробіть фото</string>
+    <string name="camera_scan_reset_zone">Скинути рамку</string>
+    <string name="cd_camera_zone_handle">Змінити розмір зони сканування</string>
+    <string name="cd_camera_zone_move">Перемістити зону сканування</string>
+    <string name="camera_scan_shutter">Зробити фото</string>
+    <string name="camera_scan_processing">Розпізнаємо вирази…</string>
+    <string name="camera_scan_retake">Перезняти</string>
+    <string name="camera_scan_select_title">Оберіть приклад</string>
+    <string name="camera_scan_found_count">Знайдено: %1$d</string>
+    <string name="camera_scan_pick_hint">Торкніться прикладу на фото або в списку</string>
+    <string name="camera_scan_none_found">Приклади не розпізнано</string>
+    <string name="camera_scan_none_hint">Спробуйте сфотографувати ближче, чіткіше або зі спалахом</string>
+    <string name="camera_scan_capture_error">Не вдалося зробити фото. Спробуйте ще раз</string>
+    <string name="camera_scan_transfer">Перенести в калькулятор</string>
+    <string name="camera_scan_transfer_short">Перенести</string>
+    <string name="cd_camera_flash">Увімкнути або вимкнути спалах</string>
+    <string name="camera_permission_title">Потрібен доступ до камери</string>
+    <string name="camera_permission_body">Дозвольте доступ до камери, щоб сфотографувати приклади та вибрати потрібний для перенесення в калькулятор.</string>
+    <string name="camera_permission_grant">Надати доступ</string>
+    <string name="camera_permission_settings">Відкрити налаштування</string>
+
+    <string name="easter_egg_liza">Я люблю Лізу❤️</string>
+
+    <string name="camera_scan_ai_analyzing">ШІ аналізує фото…</string>
+    <string name="camera_scan_ai_badge">ШІ</string>
+    <string name="camera_scan_ai_retry">Повторити (ШІ)</string>
+    <string name="camera_scan_offline_fallback">Офлайн-скан</string>
+    <string name="camera_scan_mode_ai">ШІ</string>
+    <string name="camera_scan_mode_fast">Швидко</string>
+    <string name="camera_scan_ai_error_title">Помилка ШІ-аналізу</string>
+</resources>

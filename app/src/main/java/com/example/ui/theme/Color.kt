@@ -1,0 +1,72 @@
+package com.example.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+// Expressive Material 3 fallback palette (used on Android < 12 when Dynamic Color is unavailable)
+val ExpressivePrimaryLight = Color(0xFF3E5AA9)
+val ExpressiveOnPrimaryLight = Color(0xFFFFFFFF)
+val ExpressivePrimaryContainerLight = Color(0xFFD9E2FF)
+val ExpressiveOnPrimaryContainerLight = Color(0xFF001946)
+
+val ExpressiveSecondaryLight = Color(0xFF555E77)
+val ExpressiveOnSecondaryLight = Color(0xFFFFFFFF)
+val ExpressiveSecondaryContainerLight = Color(0xFFD9E2FF)
+val ExpressiveOnSecondaryContainerLight = Color(0xFF121B31)
+
+val ExpressiveTertiaryLight = Color(0xFF8B4A60)
+val ExpressiveOnTertiaryLight = Color(0xFFFFFFFF)
+val ExpressiveTertiaryContainerLight = Color(0xFFFFD9E3)
+val ExpressiveOnTertiaryContainerLight = Color(0xFF39071D)
+
+val ExpressiveBackgroundLight = Color(0xFFECEAF2)
+val ExpressiveOnBackgroundLight = Color(0xFF1B1B20)
+val ExpressiveSurfaceLight = Color(0xFFECEAF2)
+val ExpressiveOnSurfaceLight = Color(0xFF1B1B20)
+val ExpressiveSurfaceVariantLight = Color(0xFFDCD9E6)
+val ExpressiveOnSurfaceVariantLight = Color(0xFF44454F)
+val ExpressiveOutlineLight = Color(0xFF72747E)
+val ExpressiveOutlineVariantLight = Color(0xFFBDC0CC)
+val ExpressiveSurfaceContainerLowestLight = Color(0xFFF6F4FA)
+val ExpressiveSurfaceContainerLowLight = Color(0xFFE7E4EE)
+val ExpressiveSurfaceContainerLight = Color(0xFFE2DFEB)
+val ExpressiveSurfaceContainerHighLight = Color(0xFFD9D6E4)
+val ExpressiveSurfaceContainerHighestLight = Color(0xFFD1CEDD)
+
+val ExpressivePrimaryDark = Color(0xFFB1C5FF)
+val ExpressiveOnPrimaryDark = Color(0xFF032D78)
+val ExpressivePrimaryContainerDark = Color(0xFF234390)
+val ExpressiveOnPrimaryContainerDark = Color(0xFFD9E2FF)
+
+val ExpressiveSecondaryDark = Color(0xFFBDC6E4)
+val ExpressiveOnSecondaryDark = Color(0xFF273047)
+val ExpressiveSecondaryContainerDark = Color(0xFF3E465F)
+val ExpressiveOnSecondaryContainerDark = Color(0xFFD9E2FF)
+
+val ExpressiveTertiaryDark = Color(0xFFFFB0C9)
+val ExpressiveOnTertiaryDark = Color(0xFF541D32)
+val ExpressiveTertiaryContainerDark = Color(0xFF703348)
+val ExpressiveOnTertiaryContainerDark = Color(0xFFFFD9E3)
+
+val ExpressiveBackgroundDark = Color(0xFF121318)
+val ExpressiveOnBackgroundDark = Color(0xFFE4E1E9)
+val ExpressiveSurfaceDark = Color(0xFF121318)
+val ExpressiveOnSurfaceDark = Color(0xFFE4E1E9)
+val ExpressiveSurfaceVariantDark = Color(0xFF45464F)
+val ExpressiveOnSurfaceVariantDark = Color(0xFFC5C6D0)
+val ExpressiveOutlineDark = Color(0xFF8F909A)
+val ExpressiveOutlineVariantDark = Color(0xFF45464F)
+val ExpressiveSurfaceContainerLowestDark = Color(0xFF0D0E12)
+val ExpressiveSurfaceContainerLowDark = Color(0xFF1B1B20)
+val ExpressiveSurfaceContainerDark = Color(0xFF1F1F25)
+val ExpressiveSurfaceContainerHighDark = Color(0xFF292A2F)
+val ExpressiveSurfaceContainerHighestDark = Color(0xFF34343A)
+
+val ExpressiveErrorLight = Color(0xFFBA1A1A)
+val ExpressiveOnErrorLight = Color(0xFFFFFFFF)
+val ExpressiveErrorContainerLight = Color(0xFFFFDAD6)
+val ExpressiveOnErrorContainerLight = Color(0xFF410002)
+
+val ExpressiveErrorDark = Color(0xFFFFB4AB)
+val ExpressiveOnErrorDark = Color(0xFF690005)
+val ExpressiveErrorContainerDark = Color(0xFF93000A)
+val ExpressiveOnErrorContainerDark = Color(0xFFFFDAD6)

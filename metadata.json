@@ -1,0 +1,6 @@
+{
+  "name": "ExpressiveCalc",
+  "description": "Калькулятор у стилі Material 3 Expressive з плавною анімацією кнопок, динамічними кольорами Material You, підтримкою темної теми, історією обчислень та високоточними великими числами.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
