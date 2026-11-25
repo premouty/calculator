@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "897222279088",
+    "project_id": "calculator-83d22",
+    "storage_bucket": "calculator-83d22.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:897222279088:android:50f7fee0df4998ef4ba075",
+        "android_client_info": {
+          "package_name": "com.aistudio.expressivecalc.xkqvmw"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmBh9iwRb0R6pLVHgEDYi0oUQGuPM1xkU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
