@@ -1,18 +1,18 @@
 package com.example.ui
 
 import android.app.Application
-import android.graphics.Bitmap
-import android.util.Log
 import android.view.View
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.ai.CameraMathAiAnalyzer
 import com.example.audio.CalcSoundEngine
 import com.example.audio.CalcSoundType
 import com.example.audio.CalcVibrator
+import com.example.audio.HapticIntensity
 import com.example.data.local.CalculationRecord
 import com.example.data.local.CalculatorDatabase
 import com.example.data.preferences.AngleUnit
+import com.example.data.preferences.ButtonShapeStyle
+import com.example.data.preferences.DEFAULT_SOUND_VOLUME
 import com.example.data.preferences.UserPreferencesRepository
 import com.example.data.repository.HistoryRepository
 import com.example.domain.math.EvaluationResult
@@ -20,12 +20,10 @@ import com.example.domain.math.ExpressionEvaluator
 import com.example.domain.math.FormattedNumber
 import com.example.domain.math.MathErrorType
 import com.example.domain.math.NumberFormatter
-import com.example.domain.ocr.ScannedMathExpression
+import com.example.ui.theme.DEFAULT_CUSTOM_ACCENT_ARGB
 import com.example.ui.theme.ThemeMode
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,18 +32,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 
-private const val TAG = "CalculatorViewModel"
-
-sealed interface CameraScanAnalysisState {
-    data object Idle : CameraScanAnalysisState
-    data object Loading : CameraScanAnalysisState
-    data class Success(
-        val expressions: List<ScannedMathExpression>,
-        val usedAi: Boolean
-    ) : CameraScanAnalysisState
-    data class Error(val message: String) : CameraScanAnalysisState
+enum class FeedbackPermissionTarget {
+    SOUND,
+    VIBRATION,
+    BOTH
 }
 
 data class CalculatorUiState(
@@ -61,14 +52,22 @@ data class CalculatorUiState(
     val isScientificExpanded: Boolean = false,
     val isInverseMode: Boolean = false,
     val angleUnit: AngleUnit = AngleUnit.DEG,
-    val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val isSoundEnabled: Boolean = true,
-    val isVibrationEnabled: Boolean = true,
+    val themeMode: ThemeMode = ThemeMode.DARK,
+    val isSoundEnabled: Boolean = false,
+    val isVibrationEnabled: Boolean = false,
+    val isFeedbackPermissionGranted: Boolean = false,
+    val soundVolume: Float = DEFAULT_SOUND_VOLUME,
+    val hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
+    val buttonShapeStyle: ButtonShapeStyle = ButtonShapeStyle.PILL,
+    val useDynamicColor: Boolean = true,
+    val customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
+    val showLivePreview: Boolean = true,
+    val ambientDisplayGlow: Boolean = false,
+    val pendingFeedbackPermission: FeedbackPermissionTarget? = null,
     val isTopHistoryOpen: Boolean = false,
     val isFullHistorySheetOpen: Boolean = false,
-    val isCameraScannerOpen: Boolean = false,
     val isVoiceInputDialogOpen: Boolean = false,
-    val cameraScanAnalysisState: CameraScanAnalysisState = CameraScanAnalysisState.Idle,
+    val isSettingsSheetOpen: Boolean = false,
     val bigNumberViewerRecord: Pair<String, String>? = null, // title/expression to full plain digits
     val history: List<CalculationRecord> = emptyList()
 )
@@ -80,40 +79,120 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private val prefsRepository = UserPreferencesRepository(application)
     private val soundEngine = CalcSoundEngine(application)
     private val calcVibrator = CalcVibrator(application)
-    private val cameraMathAiAnalyzer = CameraMathAiAnalyzer()
 
-    private val _state = MutableStateFlow(CalculatorUiState())
+    private val initialPrefs = prefsRepository.readInitialPreferencesSync()
+    private val _optimisticPrefs = MutableStateFlow(initialPrefs)
+    private var hasUserModifiedTheme = false
+    private var hasUserModifiedAngle = false
+    private var hasUserModifiedScientific = false
+    private var hasUserModifiedSound = false
+    private var hasUserModifiedVibration = false
+    private var hasUserModifiedFeedbackPermission = false
+    private var hasUserModifiedSoundVolume = false
+    private var hasUserModifiedHapticIntensity = false
+    private var hasUserModifiedButtonShape = false
+    private var hasUserModifiedDynamicColor = false
+    private var hasUserModifiedCustomAccent = false
+    private var hasUserModifiedLivePreview = false
+    private var hasUserModifiedAmbientGlow = false
+
+    private val _state = MutableStateFlow(
+        CalculatorUiState(
+            themeMode = initialPrefs.themeMode,
+            angleUnit = initialPrefs.angleUnit,
+            isScientificExpanded = initialPrefs.isScientificExpanded,
+            isSoundEnabled = initialPrefs.isSoundEnabled,
+            isVibrationEnabled = initialPrefs.isVibrationEnabled,
+            isFeedbackPermissionGranted = initialPrefs.isFeedbackPermissionGranted,
+            soundVolume = initialPrefs.soundVolume,
+            hapticIntensity = initialPrefs.hapticIntensity,
+            buttonShapeStyle = initialPrefs.buttonShapeStyle,
+            useDynamicColor = initialPrefs.useDynamicColor,
+            customAccentArgb = initialPrefs.customAccentArgb,
+            showLivePreview = initialPrefs.showLivePreview,
+            ambientDisplayGlow = initialPrefs.ambientDisplayGlow
+        )
+    )
     private val _rawExpression = MutableStateFlow("")
-    private val _optimisticThemeMode = MutableStateFlow<ThemeMode?>(null)
     private var evalJob: Job? = null
-    private var cameraAiJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            prefsRepository.preferencesFlow.collect { dsPrefs ->
+                _optimisticPrefs.update { current ->
+                    current.copy(
+                        themeMode = if (hasUserModifiedTheme) current.themeMode else dsPrefs.themeMode,
+                        angleUnit = if (hasUserModifiedAngle) current.angleUnit else dsPrefs.angleUnit,
+                        isScientificExpanded = if (hasUserModifiedScientific) current.isScientificExpanded else dsPrefs.isScientificExpanded,
+                        isSoundEnabled = if (hasUserModifiedSound) current.isSoundEnabled else dsPrefs.isSoundEnabled,
+                        isVibrationEnabled = if (hasUserModifiedVibration) current.isVibrationEnabled else dsPrefs.isVibrationEnabled,
+                        isFeedbackPermissionGranted = if (hasUserModifiedFeedbackPermission) {
+                            current.isFeedbackPermissionGranted
+                        } else {
+                            dsPrefs.isFeedbackPermissionGranted
+                        },
+                        soundVolume = if (hasUserModifiedSoundVolume) current.soundVolume else dsPrefs.soundVolume,
+                        hapticIntensity = if (hasUserModifiedHapticIntensity) current.hapticIntensity else dsPrefs.hapticIntensity,
+                        buttonShapeStyle = if (hasUserModifiedButtonShape) current.buttonShapeStyle else dsPrefs.buttonShapeStyle,
+                        useDynamicColor = if (hasUserModifiedDynamicColor) current.useDynamicColor else dsPrefs.useDynamicColor,
+                        customAccentArgb = if (hasUserModifiedCustomAccent) current.customAccentArgb else dsPrefs.customAccentArgb,
+                        showLivePreview = if (hasUserModifiedLivePreview) current.showLivePreview else dsPrefs.showLivePreview,
+                        ambientDisplayGlow = if (hasUserModifiedAmbientGlow) current.ambientDisplayGlow else dsPrefs.ambientDisplayGlow
+                    )
+                }
+            }
+        }
+    }
 
     val uiState: StateFlow<CalculatorUiState> = combine(
         _state,
         historyRepository.historyStream,
-        prefsRepository.preferencesFlow,
-        _optimisticThemeMode
-    ) { state, history, prefs, optimisticTheme ->
+        _optimisticPrefs
+    ) { state, history, prefs ->
         state.copy(
             history = history,
-            themeMode = optimisticTheme ?: prefs.themeMode,
+            themeMode = prefs.themeMode,
             angleUnit = prefs.angleUnit,
             isScientificExpanded = prefs.isScientificExpanded,
             isSoundEnabled = prefs.isSoundEnabled,
-            isVibrationEnabled = prefs.isVibrationEnabled
+            isVibrationEnabled = prefs.isVibrationEnabled,
+            isFeedbackPermissionGranted = prefs.isFeedbackPermissionGranted,
+            soundVolume = prefs.soundVolume,
+            hapticIntensity = prefs.hapticIntensity,
+            buttonShapeStyle = prefs.buttonShapeStyle,
+            useDynamicColor = prefs.useDynamicColor,
+            customAccentArgb = prefs.customAccentArgb,
+            showLivePreview = prefs.showLivePreview,
+            ambientDisplayGlow = prefs.ambientDisplayGlow
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = CalculatorUiState()
+        initialValue = CalculatorUiState(
+            themeMode = initialPrefs.themeMode,
+            angleUnit = initialPrefs.angleUnit,
+            isScientificExpanded = initialPrefs.isScientificExpanded,
+            isSoundEnabled = initialPrefs.isSoundEnabled,
+            isVibrationEnabled = initialPrefs.isVibrationEnabled,
+            isFeedbackPermissionGranted = initialPrefs.isFeedbackPermissionGranted,
+            soundVolume = initialPrefs.soundVolume,
+            hapticIntensity = initialPrefs.hapticIntensity,
+            buttonShapeStyle = initialPrefs.buttonShapeStyle,
+            useDynamicColor = initialPrefs.useDynamicColor,
+            customAccentArgb = initialPrefs.customAccentArgb,
+            showLivePreview = initialPrefs.showLivePreview,
+            ambientDisplayGlow = initialPrefs.ambientDisplayGlow
+        )
     )
 
     fun playSound(type: CalcSoundType) {
-        soundEngine.play(type, uiState.value.isSoundEnabled)
+        val prefs = _optimisticPrefs.value
+        soundEngine.play(type, prefs.isSoundEnabled, prefs.soundVolume)
     }
 
     fun performHaptic(type: CalcSoundType, view: View? = null) {
-        calcVibrator.vibrate(type, uiState.value.isVibrationEnabled, view)
+        val prefs = _optimisticPrefs.value
+        calcVibrator.vibrate(type, prefs.isVibrationEnabled, prefs.hapticIntensity, view)
     }
 
     override fun onCleared() {
@@ -341,7 +420,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     fun onEquals() {
         val current = _rawExpression.value.trim()
         if (current.isEmpty()) return
-        val angle = uiState.value.angleUnit
+        val angle = _optimisticPrefs.value.angleUnit
 
         evalJob?.cancel()
         evalJob = viewModelScope.launch {
@@ -387,7 +466,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun toggleScientificExpanded() {
-        val next = !uiState.value.isScientificExpanded
+        hasUserModifiedScientific = true
+        val next = !_optimisticPrefs.value.isScientificExpanded
+        _optimisticPrefs.update { it.copy(isScientificExpanded = next) }
         viewModelScope.launch {
             prefsRepository.setScientificExpanded(next)
         }
@@ -398,7 +479,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun toggleAngleUnit() {
-        val next = if (uiState.value.angleUnit == AngleUnit.DEG) AngleUnit.RAD else AngleUnit.DEG
+        hasUserModifiedAngle = true
+        val next = if (_optimisticPrefs.value.angleUnit == AngleUnit.DEG) AngleUnit.RAD else AngleUnit.DEG
+        _optimisticPrefs.update { it.copy(angleUnit = next) }
         viewModelScope.launch {
             prefsRepository.setAngleUnit(next)
             recalculateLivePreview(_rawExpression.value, next)
@@ -406,36 +489,215 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun cycleThemeMode() {
-        val next = when (uiState.value.themeMode) {
-            ThemeMode.SYSTEM -> ThemeMode.LIGHT
+        val next = when (_optimisticPrefs.value.themeMode) {
+            ThemeMode.DARK -> ThemeMode.LIGHT
             ThemeMode.LIGHT -> ThemeMode.DARK
-            ThemeMode.DARK -> ThemeMode.SYSTEM
         }
         setThemeMode(next)
     }
 
     fun toggleSoundEnabled() {
-        val next = !uiState.value.isSoundEnabled
+        val current = _optimisticPrefs.value
+        val next = !current.isSoundEnabled
+        if (next && !current.isFeedbackPermissionGranted) {
+            _state.update { it.copy(pendingFeedbackPermission = FeedbackPermissionTarget.SOUND) }
+            return
+        }
+        hasUserModifiedSound = true
+        _optimisticPrefs.update { it.copy(isSoundEnabled = next) }
+        if (next) {
+            soundEngine.play(CalcSoundType.UTILITY, enabled = true, volume = current.soundVolume)
+        }
         viewModelScope.launch {
             prefsRepository.setSoundEnabled(next)
         }
     }
 
     fun toggleVibrationEnabled(view: View? = null) {
-        val next = !uiState.value.isVibrationEnabled
+        val current = _optimisticPrefs.value
+        val next = !current.isVibrationEnabled
+        if (next && !current.isFeedbackPermissionGranted) {
+            _state.update { it.copy(pendingFeedbackPermission = FeedbackPermissionTarget.VIBRATION) }
+            return
+        }
+        hasUserModifiedVibration = true
+        _optimisticPrefs.update { it.copy(isVibrationEnabled = next) }
         if (next) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, view = view)
+            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
         }
         viewModelScope.launch {
             prefsRepository.setVibrationEnabled(next)
         }
     }
 
+    fun setFeedbackEnabled(soundEnabled: Boolean, vibrationEnabled: Boolean, view: View? = null) {
+        val current = _optimisticPrefs.value
+        if ((soundEnabled || vibrationEnabled) && !current.isFeedbackPermissionGranted) {
+            val target = when {
+                soundEnabled && vibrationEnabled -> FeedbackPermissionTarget.BOTH
+                soundEnabled -> FeedbackPermissionTarget.SOUND
+                else -> FeedbackPermissionTarget.VIBRATION
+            }
+            _state.update { it.copy(pendingFeedbackPermission = target) }
+            return
+        }
+        hasUserModifiedSound = true
+        hasUserModifiedVibration = true
+        _optimisticPrefs.update {
+            it.copy(
+                isSoundEnabled = soundEnabled,
+                isVibrationEnabled = vibrationEnabled
+            )
+        }
+        if (soundEnabled) {
+            soundEngine.play(CalcSoundType.UTILITY, enabled = true, volume = current.soundVolume)
+        }
+        if (vibrationEnabled) {
+            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
+        }
+        viewModelScope.launch {
+            prefsRepository.setFeedbackEnabled(soundEnabled, vibrationEnabled)
+        }
+    }
+
+    fun confirmFeedbackPermission(view: View? = null) {
+        val target = _state.value.pendingFeedbackPermission ?: FeedbackPermissionTarget.BOTH
+        val current = _optimisticPrefs.value
+        val enableSound = current.isSoundEnabled ||
+            target == FeedbackPermissionTarget.SOUND ||
+            target == FeedbackPermissionTarget.BOTH
+        val enableVibration = current.isVibrationEnabled ||
+            target == FeedbackPermissionTarget.VIBRATION ||
+            target == FeedbackPermissionTarget.BOTH
+
+        hasUserModifiedFeedbackPermission = true
+        hasUserModifiedSound = true
+        hasUserModifiedVibration = true
+
+        _state.update { it.copy(pendingFeedbackPermission = null) }
+        _optimisticPrefs.update {
+            it.copy(
+                isFeedbackPermissionGranted = true,
+                isSoundEnabled = enableSound,
+                isVibrationEnabled = enableVibration
+            )
+        }
+
+        if (enableSound) {
+            soundEngine.play(CalcSoundType.UTILITY, enabled = true, volume = current.soundVolume)
+        }
+        if (enableVibration) {
+            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
+        }
+
+        viewModelScope.launch {
+            prefsRepository.grantFeedbackPermissionAndEnable(
+                soundEnabled = enableSound,
+                vibrationEnabled = enableVibration
+            )
+        }
+    }
+
+    fun dismissFeedbackPermission() {
+        _state.update { it.copy(pendingFeedbackPermission = null) }
+    }
+
     fun setThemeMode(mode: ThemeMode) {
-        _optimisticThemeMode.value = mode
+        hasUserModifiedTheme = true
+        _optimisticPrefs.update { it.copy(themeMode = mode) }
         viewModelScope.launch {
             prefsRepository.setThemeMode(mode)
-            _optimisticThemeMode.compareAndSet(mode, null)
+        }
+    }
+
+    fun setSoundVolume(volume: Float) {
+        val clamped = volume.coerceIn(0.05f, 1.0f)
+        hasUserModifiedSoundVolume = true
+        _optimisticPrefs.update { it.copy(soundVolume = clamped) }
+        viewModelScope.launch {
+            prefsRepository.setSoundVolume(clamped)
+        }
+    }
+
+    fun previewSoundVolume() {
+        val prefs = _optimisticPrefs.value
+        if (prefs.isSoundEnabled) {
+            soundEngine.play(CalcSoundType.DIGIT, enabled = true, volume = prefs.soundVolume)
+        }
+    }
+
+    fun setHapticIntensity(intensity: HapticIntensity, view: View? = null) {
+        hasUserModifiedHapticIntensity = true
+        _optimisticPrefs.update { it.copy(hapticIntensity = intensity) }
+        if (_optimisticPrefs.value.isVibrationEnabled) {
+            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = intensity, view = view)
+        }
+        viewModelScope.launch {
+            prefsRepository.setHapticIntensity(intensity)
+        }
+    }
+
+    fun setButtonShapeStyle(style: ButtonShapeStyle) {
+        hasUserModifiedButtonShape = true
+        _optimisticPrefs.update { it.copy(buttonShapeStyle = style) }
+        viewModelScope.launch {
+            prefsRepository.setButtonShapeStyle(style)
+        }
+    }
+
+    fun setUseDynamicColor(enabled: Boolean) {
+        hasUserModifiedDynamicColor = true
+        _optimisticPrefs.update { it.copy(useDynamicColor = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setUseDynamicColor(enabled)
+        }
+    }
+
+    fun setCustomAccentArgb(argb: Long) {
+        hasUserModifiedCustomAccent = true
+        _optimisticPrefs.update { it.copy(customAccentArgb = argb) }
+        viewModelScope.launch {
+            prefsRepository.setCustomAccentArgb(argb)
+        }
+    }
+
+    fun setShowLivePreview(enabled: Boolean) {
+        hasUserModifiedLivePreview = true
+        _optimisticPrefs.update { it.copy(showLivePreview = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setShowLivePreview(enabled)
+        }
+    }
+
+    fun setAmbientDisplayGlow(enabled: Boolean) {
+        hasUserModifiedAmbientGlow = true
+        _optimisticPrefs.update { it.copy(ambientDisplayGlow = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setAmbientDisplayGlow(enabled)
+        }
+    }
+
+    fun resetCustomizationsToDefaults() {
+        hasUserModifiedSoundVolume = true
+        hasUserModifiedHapticIntensity = true
+        hasUserModifiedButtonShape = true
+        hasUserModifiedDynamicColor = true
+        hasUserModifiedCustomAccent = true
+        hasUserModifiedLivePreview = true
+        hasUserModifiedAmbientGlow = true
+        _optimisticPrefs.update {
+            it.copy(
+                soundVolume = DEFAULT_SOUND_VOLUME,
+                hapticIntensity = HapticIntensity.MEDIUM,
+                buttonShapeStyle = ButtonShapeStyle.PILL,
+                useDynamicColor = true,
+                customAccentArgb = DEFAULT_CUSTOM_ACCENT_ARGB,
+                showLivePreview = true,
+                ambientDisplayGlow = false
+            )
+        }
+        viewModelScope.launch {
+            prefsRepository.resetCustomizationsToDefaults()
         }
     }
 
@@ -452,7 +714,8 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(
                 isFullHistorySheetOpen = open,
                 isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
-                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
+                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen,
+                isSettingsSheetOpen = if (open) false else it.isSettingsSheetOpen
             )
         }
     }
@@ -462,7 +725,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(
                 isVoiceInputDialogOpen = open,
                 isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
-                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen
+                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen,
+                isSettingsSheetOpen = if (open) false else it.isSettingsSheetOpen
+            )
+        }
+    }
+
+    fun setSettingsSheetOpen(open: Boolean) {
+        _state.update {
+            it.copy(
+                isSettingsSheetOpen = open,
+                isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
+                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen,
+                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
             )
         }
     }
@@ -480,95 +755,6 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         if (evaluateImmediately) {
             onEquals()
         }
-    }
-
-    fun setCameraScannerOpen(open: Boolean) {
-        if (!open) {
-            cameraAiJob?.cancel()
-        }
-        _state.update {
-            it.copy(
-                isCameraScannerOpen = open,
-                cameraScanAnalysisState = if (!open) CameraScanAnalysisState.Idle else it.cameraScanAnalysisState,
-                isTopHistoryOpen = if (open) false else it.isTopHistoryOpen,
-                isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen,
-                isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
-            )
-        }
-    }
-
-    fun analyzeCameraPhotoWithAi(bitmap: Bitmap) {
-        val angle = uiState.value.angleUnit
-        cameraAiJob?.cancel()
-        cameraAiJob = viewModelScope.launch {
-            _state.update { it.copy(cameraScanAnalysisState = CameraScanAnalysisState.Loading) }
-            try {
-                val results = withTimeout(60_000L) {
-                    cameraMathAiAnalyzer.analyzePhoto(bitmap, angle)
-                }
-                _state.update {
-                    it.copy(
-                        cameraScanAnalysisState = CameraScanAnalysisState.Success(
-                            expressions = results,
-                            usedAi = true
-                        )
-                    )
-                }
-            } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "AI math photo analysis timed out", e)
-                _state.update {
-                    it.copy(
-                        cameraScanAnalysisState = CameraScanAnalysisState.Error(
-                            "ШІ-аналіз тривав довше 60 секунд. Спробуйте ще раз або оберіть офлайн-скан."
-                        )
-                    )
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (t: Throwable) {
-                Log.e(TAG, "AI math photo analysis failed", t)
-                _state.update {
-                    it.copy(
-                        cameraScanAnalysisState = CameraScanAnalysisState.Error(
-                            t.localizedMessage ?: "Не вдалося виконати ШІ-аналіз фото."
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    fun setCameraScanOfflineResult(expressions: List<ScannedMathExpression>) {
-        cameraAiJob?.cancel()
-        _state.update {
-            it.copy(
-                cameraScanAnalysisState = CameraScanAnalysisState.Success(
-                    expressions = expressions,
-                    usedAi = false
-                )
-            )
-        }
-    }
-
-    fun resetCameraScanAnalysis() {
-        cameraAiJob?.cancel()
-        _state.update {
-            it.copy(cameraScanAnalysisState = CameraScanAnalysisState.Idle)
-        }
-    }
-
-    fun applyScannedExpression(rawExpr: String) {
-        val cleaned = rawExpr.trim()
-        if (cleaned.isEmpty()) return
-        cameraAiJob?.cancel()
-        _state.update {
-            it.copy(
-                isCameraScannerOpen = false,
-                cameraScanAnalysisState = CameraScanAnalysisState.Idle,
-                lastCompletedExpression = ""
-            )
-        }
-        updateExpression(cleaned, isResult = false)
     }
 
     fun openBigNumberViewer(expressionLabel: String, plainDigits: String) {
@@ -624,7 +810,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private fun updateExpression(newRaw: String, isResult: Boolean) {
         _rawExpression.value = newRaw
         val formatted = NumberFormatter.formatExpressionForDisplay(newRaw)
-        val angle = uiState.value.angleUnit
+        val angle = _optimisticPrefs.value.angleUnit
 
         if (newRaw.isEmpty()) {
             evalJob?.cancel()

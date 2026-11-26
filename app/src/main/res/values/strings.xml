@@ -2,16 +2,19 @@
     <string name="app_name">ExpressiveCalc</string>
     <string name="cd_history_button">Відкрити історію обчислень</string>
     <string name="cd_theme_button">Перемкнути тему оформлення</string>
-    <string name="cd_sound_toggle">Увімкнути або вимкнути звук клавіш</string>
-    <string name="cd_vibration_toggle">Увімкнути або вимкнути вібрацію клавіш</string>
     <string name="cd_feedback_toggle">Налаштування звуку та вібрації</string>
     <string name="feedback_sound_label">Звук клавіш</string>
     <string name="feedback_vibration_label">Вібрація клавіш</string>
+    <string name="feedback_permission_title">Дозвіл на звук та вібрацію</string>
+    <string name="feedback_permission_body">Дозвольте калькулятору відтворювати легкий відгук клавіш і тактильну вібрацію на цьому пристрої.</string>
+    <string name="feedback_permission_allow">Дозволити</string>
+    <string name="feedback_permission_deny">Не зараз</string>
+    <string name="feedback_permission_system_settings">Налаштування звуку</string>
+    <string name="feedback_permission_muted_hint">Здається, медіа-гучність на телефоні вимкнена — перевірте гучність або налаштування звуку.</string>
     <string name="cd_scientific_toggle">Розгорнути або згорнути наукову панель</string>
     <string name="cd_backspace">Видалити останній символ</string>
     <string name="cd_pull_handle">Потягніть вниз для швидкої історії</string>
     <string name="cd_copy_result">Скопіювати результат</string>
-    <string name="cd_copy_display">Копіювати число або вираз</string>
     <string name="cd_delete_record">Видалити запис</string>
     <string name="cd_close">Закрити</string>
 
@@ -26,15 +29,11 @@
     <string name="history_clear_confirm_body">Усі збережені вирази та результати буде видалено з пристрою без можливості відновлення.</string>
     <string name="action_cancel">Скасувати</string>
     <string name="action_clear">Очистити</string>
-    <string name="action_use_expression">Вираз</string>
-    <string name="action_use_result">Результат</string>
-    <string name="action_copy">Копіювати</string>
 
     <string name="group_today">Сьогодні</string>
     <string name="group_yesterday">Вчора</string>
     <string name="group_earlier">Раніше</string>
 
-    <string name="theme_system">Системна</string>
     <string name="theme_light">Світла</string>
     <string name="theme_dark">Темна</string>
 
@@ -50,39 +49,7 @@
     <string name="error_syntax">Некоректний вираз</string>
     <string name="error_overflow">Число занадто велике</string>
 
-    <string name="cd_camera_scan">Сканувати приклад камерою</string>
-    <string name="camera_scan_chip">Скан</string>
-    <string name="camera_scan_title">Сканер прикладів</string>
-    <string name="camera_scan_hint">Наведіть на приклади, змініть рамку за потреби та зробіть фото</string>
-    <string name="camera_scan_reset_zone">Скинути рамку</string>
-    <string name="cd_camera_zone_handle">Змінити розмір зони сканування</string>
-    <string name="cd_camera_zone_move">Перемістити зону сканування</string>
-    <string name="camera_scan_shutter">Зробити фото</string>
-    <string name="camera_scan_processing">Розпізнаємо вирази…</string>
-    <string name="camera_scan_retake">Перезняти</string>
-    <string name="camera_scan_select_title">Оберіть приклад</string>
-    <string name="camera_scan_found_count">Знайдено: %1$d</string>
-    <string name="camera_scan_pick_hint">Торкніться прикладу на фото або в списку</string>
-    <string name="camera_scan_none_found">Приклади не розпізнано</string>
-    <string name="camera_scan_none_hint">Спробуйте сфотографувати ближче, чіткіше або зі спалахом</string>
-    <string name="camera_scan_capture_error">Не вдалося зробити фото. Спробуйте ще раз</string>
-    <string name="camera_scan_transfer">Перенести в калькулятор</string>
-    <string name="camera_scan_transfer_short">Перенести</string>
-    <string name="cd_camera_flash">Увімкнути або вимкнути спалах</string>
-    <string name="camera_permission_title">Потрібен доступ до камери</string>
-    <string name="camera_permission_body">Дозвольте доступ до камери, щоб сфотографувати приклади та вибрати потрібний для перенесення в калькулятор.</string>
-    <string name="camera_permission_grant">Надати доступ</string>
-    <string name="camera_permission_settings">Відкрити налаштування</string>
-
     <string name="easter_egg_liza">я люблю лізу🩷</string>
-
-    <string name="camera_scan_ai_analyzing">ШІ аналізує фото…</string>
-    <string name="camera_scan_ai_badge">ШІ</string>
-    <string name="camera_scan_ai_retry">Повторити (ШІ)</string>
-    <string name="camera_scan_offline_fallback">Офлайн-скан</string>
-    <string name="camera_scan_mode_ai">ШІ</string>
-    <string name="camera_scan_mode_fast">Швидко</string>
-    <string name="camera_scan_ai_error_title">Помилка ШІ-аналізу</string>
 
 
     <string name="cd_voice_input">Голосове введення</string>
@@ -93,7 +60,6 @@
     <string name="voice_tap_to_speak">Натисніть мікрофон, щоб почати</string>
     <string name="voice_stop_listening">Зупинити</string>
     <string name="voice_spoken_label">Почуто:</string>
-    <string name="voice_parsed_label">Вираз:</string>
     <string name="voice_no_math_found">Не вдалося виділити математичний вираз. Спробуйте сказати чіткіше, наприклад: «12 помножити на 4».</string>
     <string name="voice_apply">Вставити</string>
     <string name="voice_evaluate">Порахувати</string>
@@ -105,4 +71,36 @@
     <string name="voice_permission_body">Дозвольте доступ до мікрофона, щоб диктувати приклади та обчислення голосом.</string>
     <string name="voice_permission_grant">Надати доступ</string>
     <string name="voice_permission_settings">Відкрити налаштування</string>
+
+    <string name="cd_settings_button">Відкрити налаштування</string>
+    <string name="settings_title">Налаштування</string>
+    <string name="settings_open_all">Усі налаштування</string>
+    <string name="settings_section_feedback">Звук і тактильний відгук</string>
+    <string name="settings_section_appearance">Зовнішній вигляд</string>
+    <string name="settings_section_extras">Додаткові можливості</string>
+
+    <string name="settings_sound_volume_title">Гучність звуку клавіш</string>
+
+    <string name="settings_haptic_intensity_title">Інтенсивність вібрації</string>
+    <string name="settings_haptic_light">Легка</string>
+    <string name="settings_haptic_medium">Середня</string>
+    <string name="settings_haptic_strong">Сильна</string>
+
+    <string name="settings_theme_title">Тема оформлення</string>
+    <string name="settings_dynamic_color_title">Динамічні кольори</string>
+    <string name="settings_dynamic_color_subtitle">Адаптувати палітру під кольори шпалер (Material You)</string>
+    <string name="settings_custom_color_title">Власний колір акценту</string>
+    <string name="settings_custom_color_hue">Відтінок</string>
+    <string name="settings_custom_color_saturation">Насиченість</string>
+    <string name="settings_button_shape_title">Форма кнопок</string>
+    <string name="settings_shape_pill">Округлі</string>
+    <string name="settings_shape_squircle">Сквіркл</string>
+    <string name="settings_shape_sharp">Геометрія</string>
+
+    <string name="settings_live_preview_title">Жива підказка результату</string>
+    <string name="settings_live_preview_subtitle">Показувати попередній результат під час введення</string>
+    <string name="settings_ambient_glow_title">Атмосферне сяйво дисплея</string>
+    <string name="settings_ambient_glow_subtitle">М’яке фонове підсвічування картки дисплея</string>
+    <string name="settings_reset_defaults">Скинути налаштування</string>
+    <string name="settings_reset_done">Налаштування скинуто</string>
 </resources>

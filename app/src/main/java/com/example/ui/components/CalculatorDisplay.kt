@@ -4,8 +4,14 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -51,17 +57,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import android.content.Context
+import android.content.Intent
+import android.media.AudioManager
+import android.provider.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -84,15 +96,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -100,9 +117,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -186,15 +206,19 @@ fun CalculatorDisplay(
     onToggleTheme: () -> Unit,
     onToggleSound: () -> Unit,
     onToggleVibration: () -> Unit,
+    onQuickToggleFeedback: (Boolean, Boolean) -> Unit,
     onToggleTopHistory: () -> Unit,
     onSetTopHistoryOpen: (Boolean) -> Unit,
     onOpenFullHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
     onInspectBigNumber: (String, String) -> Unit,
     modifier: Modifier = Modifier,
-    compactMode: Boolean = false
+    compactMode: Boolean = false,
+    onThemeButtonPositioned: ((Offset) -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
-    val shakeOffset = remember { Animatable(0f) }
+    val errorTremor = remember { Animatable(0f) }
+    val errorFlash = remember { Animatable(0f) }
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
     val playSound = LocalPlayCalcSound.current
     val performHaptic = LocalPerformCalcHaptic.current
@@ -207,6 +231,16 @@ fun CalculatorDisplay(
         MathErrorType.OVERFLOW -> stringResource(R.string.error_overflow)
         null -> null
     }
+    val hasError = errorText != null
+    var lastErrorText by remember { mutableStateOf("") }
+    if (errorText != null) {
+        lastErrorText = errorText
+    }
+    val persistentErrorAlpha by animateFloatAsState(
+        targetValue = if (hasError) 1f else 0f,
+        animationSpec = tween(durationMillis = 220),
+        label = "persistent_error_alpha"
+    )
 
     val isLizaEasterEgg = errorText == null &&
         !state.isResultDisplayed &&
@@ -231,7 +265,7 @@ fun CalculatorDisplay(
                 targetValue = 1f,
                 animationSpec = tween(
                     durationMillis = 1450,
-                    easing = androidx.compose.animation.core.LinearEasing
+                    easing = LinearEasing
                 )
             )
         } else {
@@ -240,28 +274,75 @@ fun CalculatorDisplay(
         }
     }
 
-    LaunchedEffect(mainDisplayText, scrollState.maxValue) {
-        if (scrollState.maxValue > 0) {
-            scrollState.scrollTo(scrollState.maxValue)
+    val resultRevealAnim = remember { Animatable(1f) }
+    var prevIsResultDisplayed by remember { mutableStateOf(state.isResultDisplayed) }
+    LaunchedEffect(state.isResultDisplayed, state.rawExpression.isEmpty()) {
+        if (scrollState.value != 0) {
+            scrollState.scrollTo(0)
         }
+        if (state.isResultDisplayed && !prevIsResultDisplayed) {
+            resultRevealAnim.snapTo(0f)
+            resultRevealAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+            )
+        } else if (!state.isResultDisplayed) {
+            resultRevealAnim.snapTo(1f)
+        }
+        prevIsResultDisplayed = state.isResultDisplayed
     }
 
     LaunchedEffect(state.errorTriggerId) {
         if (state.errorTriggerId > 0L) {
-            val sequence = listOf(-18f, 18f, -12f, 12f, -6f, 0f)
-            for (target in sequence) {
-                shakeOffset.animateTo(target, animationSpec = tween(durationMillis = 40))
+            launch {
+                errorTremor.snapTo(0f)
+                errorTremor.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 440, easing = LinearEasing)
+                )
+                errorTremor.snapTo(0f)
+            }
+            launch {
+                errorFlash.snapTo(0f)
+                errorFlash.animateTo(1f, animationSpec = tween(durationMillis = 80))
+                errorFlash.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(
+                        durationMillis = 560,
+                        easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+                    )
+                )
             }
         }
     }
 
     val cardShape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
+    val errorAccentColor = MaterialTheme.colorScheme.error
+    val ambientPrimaryColor = MaterialTheme.colorScheme.primary
+    val ambientTertiaryColor = MaterialTheme.colorScheme.tertiary
+    val errorBorderPath = remember { Path() }
+
+    val ambientDrift = if (state.ambientDisplayGlow) {
+        val transition = rememberInfiniteTransition(label = "display_ambient_glow")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 6200, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "display_ambient_phase"
+        ).value
+    } else {
+        0f
+    }
 
     Surface(
         shape = cardShape,
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = modifier
             .fillMaxWidth()
+            .clip(cardShape)
             .pointerInput(state.isTopHistoryOpen) {
                 detectVerticalDragGestures(
                     onDragStart = { dragAccumulator = 0f },
@@ -282,6 +363,89 @@ fun CalculatorDisplay(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .drawBehind {
+                    if (state.ambientDisplayGlow) {
+                        val c1 = Offset(
+                            x = size.width * (0.20f + 0.16f * ambientDrift),
+                            y = size.height * (0.28f + 0.14f * (1f - ambientDrift))
+                        )
+                        val r1 = size.maxDimension * 0.62f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                0.0f to ambientPrimaryColor.copy(alpha = 0.11f),
+                                0.6f to ambientPrimaryColor.copy(alpha = 0.04f),
+                                1.0f to Color.Transparent,
+                                center = c1,
+                                radius = r1
+                            ),
+                            center = c1,
+                            radius = r1
+                        )
+
+                        val c2 = Offset(
+                            x = size.width * (0.82f - 0.14f * ambientDrift),
+                            y = size.height * (0.72f - 0.12f * ambientDrift)
+                        )
+                        val r2 = size.maxDimension * 0.56f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                0.0f to ambientTertiaryColor.copy(alpha = 0.09f),
+                                0.6f to ambientTertiaryColor.copy(alpha = 0.03f),
+                                1.0f to Color.Transparent,
+                                center = c2,
+                                radius = r2
+                            ),
+                            center = c2,
+                            radius = r2
+                        )
+                    }
+
+                    val flash = errorFlash.value
+                    val persist = persistentErrorAlpha
+                    if (flash > 0.005f || persist > 0.005f) {
+                        val auraAlpha = (0.055f * persist + 0.13f * flash).coerceIn(0f, 0.24f)
+                        val auraCenter = Offset(size.width * 0.72f, size.height * 0.78f)
+                        val auraRadius = size.maxDimension * 0.75f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                0.0f to errorAccentColor.copy(alpha = auraAlpha),
+                                0.65f to errorAccentColor.copy(alpha = auraAlpha * 0.35f),
+                                1.0f to Color.Transparent,
+                                center = auraCenter,
+                                radius = auraRadius
+                            ),
+                            center = auraCenter,
+                            radius = auraRadius
+                        )
+
+                        val cornerPx = 32.dp.toPx()
+                        val strokePx = 1.5.dp.toPx()
+                        val inset = strokePx / 2f
+                        val strokeAlpha = (0.28f * persist + 0.56f * flash).coerceIn(0f, 0.85f)
+                        errorBorderPath.reset()
+                        errorBorderPath.addRoundRect(
+                            RoundRect(
+                                left = inset,
+                                top = -cornerPx,
+                                right = size.width - inset,
+                                bottom = size.height - inset,
+                                topLeftCornerRadius = CornerRadius.Zero,
+                                topRightCornerRadius = CornerRadius.Zero,
+                                bottomLeftCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset),
+                                bottomRightCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset)
+                            )
+                        )
+                        drawPath(
+                            path = errorBorderPath,
+                            brush = Brush.verticalGradient(
+                                0.0f to Color.Transparent,
+                                0.45f to errorAccentColor.copy(alpha = strokeAlpha * 0.35f),
+                                1.0f to errorAccentColor.copy(alpha = strokeAlpha)
+                            ),
+                            style = Stroke(width = strokePx)
+                        )
+                    }
+                }
                 .onGloballyPositioned { displayRootCoords = it },
             propagateMinConstraints = true
         ) {
@@ -300,6 +464,7 @@ fun CalculatorDisplay(
                 ) {
                     ThemeModeChip(
                         themeMode = state.themeMode,
+                        onPositioned = onThemeButtonPositioned,
                         onClick = {
                             playSound(CalcSoundType.OPERATOR)
                             performHaptic(CalcSoundType.OPERATOR)
@@ -307,7 +472,7 @@ fun CalculatorDisplay(
                         }
                     )
 
-                    // Right utility pills: Unified Sound & Vibration pill + History pill
+                    // Right utility pills: Unified Sound & Vibration pill + History pill + Settings pill
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -325,9 +490,9 @@ fun CalculatorDisplay(
                             },
                             onQuickToggleAll = {
                                 val turnOnBoth = !state.isSoundEnabled && !state.isVibrationEnabled
-                                if (turnOnBoth || state.isSoundEnabled) onToggleSound()
-                                if (turnOnBoth || state.isVibrationEnabled) onToggleVibration()
-                            }
+                                onQuickToggleFeedback(turnOnBoth, turnOnBoth)
+                            },
+                            onOpenSettings = onOpenSettings
                         )
 
                         Surface(
@@ -363,6 +528,29 @@ fun CalculatorDisplay(
                                 }
                             }
                         }
+
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    playSound(CalcSoundType.OPERATOR)
+                                    performHaptic(CalcSoundType.OPERATOR)
+                                    onOpenSettings()
+                                }
+                                .testTag("open_settings_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Tune,
+                                    contentDescription = stringResource(R.string.cd_settings_button),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -388,8 +576,14 @@ fun CalculatorDisplay(
                     }
                 }
 
+                val errorTintColor = lerp(
+                    MaterialTheme.colorScheme.onSurface,
+                    MaterialTheme.colorScheme.error,
+                    0.76f + 0.24f * errorFlash.value
+                )
                 val displayTextColor by animateColorAsState(
                     targetValue = when {
+                        hasError -> errorTintColor
                         state.rawExpression.isEmpty() -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                         state.isResultDisplayed -> MaterialTheme.colorScheme.primary
                         else -> MaterialTheme.colorScheme.onSurface
@@ -407,11 +601,21 @@ fun CalculatorDisplay(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = if (compactMode) 2.dp else 8.dp)
-                        .offset { IntOffset(shakeOffset.value.roundToInt(), 0) },
+                        .graphicsLayer {
+                            val t = errorTremor.value
+                            if (t > 0f && t < 1f) {
+                                val decay = (1f - t).pow(1.45f)
+                                val wave = sin(t * PI.toFloat() * 5f)
+                                translationX = wave * 11.dp.toPx() * decay
+                                val scaleBump = 1f + 0.015f * sin(t * PI.toFloat())
+                                scaleX = scaleBump
+                                scaleY = scaleBump
+                            }
+                        },
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     val safeAvailableWidthPx = with(density) {
-                        (maxWidth - 6.dp).toPx().coerceAtLeast(1f)
+                        (maxWidth - 10.dp).toPx().coerceAtLeast(1f)
                     }
                     val maxFontSp = if (compactMode) 44f else 58f
                     val minFontSp = if (compactMode) 20f else 24f
@@ -424,12 +628,11 @@ fun CalculatorDisplay(
                         activeFontWeight,
                         baseDisplayStyle
                     ) {
-                        var candidateSp = maxFontSp
-                        val maxWidthMeasured = textMeasurer.measure(
+                        fun measureWidth(spVal: Float): Float = textMeasurer.measure(
                             text = mainDisplayText,
                             style = baseDisplayStyle.copy(
-                                fontSize = candidateSp.sp,
-                                lineHeight = (candidateSp * 1.15f).sp,
+                                fontSize = spVal.sp,
+                                lineHeight = (spVal * 1.15f).sp,
                                 letterSpacing = 0.25.sp,
                                 fontWeight = activeFontWeight
                             ),
@@ -437,45 +640,40 @@ fun CalculatorDisplay(
                             softWrap = false
                         ).size.width.toFloat()
 
-                        if (maxWidthMeasured > safeAvailableWidthPx) {
-                            val ratio = (safeAvailableWidthPx / maxWidthMeasured).coerceIn(0.2f, 1f)
-                            candidateSp = (candidateSp * ratio).coerceIn(minFontSp, maxFontSp)
-                            // Refine slightly so glyphs never clip past the edge when >= minFontSp
-                            var stepDown = 0
-                            while (candidateSp > minFontSp && stepDown < 4) {
-                                val checkWidth = textMeasurer.measure(
-                                    text = mainDisplayText,
-                                    style = baseDisplayStyle.copy(
-                                        fontSize = candidateSp.sp,
-                                        lineHeight = (candidateSp * 1.15f).sp,
-                                        letterSpacing = 0.25.sp,
-                                        fontWeight = activeFontWeight
-                                    ),
-                                    maxLines = 1,
-                                    softWrap = false
-                                ).size.width.toFloat()
-                                if (checkWidth <= safeAvailableWidthPx) break
-                                candidateSp = (candidateSp - 1f).coerceAtLeast(minFontSp)
-                                stepDown++
+                        if (measureWidth(maxFontSp) <= safeAvailableWidthPx) {
+                            maxFontSp.sp
+                        } else if (measureWidth(minFontSp) > safeAvailableWidthPx) {
+                            minFontSp.sp
+                        } else {
+                            var low = minFontSp
+                            var high = maxFontSp
+                            repeat(10) {
+                                val mid = (low + high) * 0.5f
+                                if (measureWidth(mid) <= safeAvailableWidthPx) {
+                                    low = mid
+                                } else {
+                                    high = mid
+                                }
                             }
+                            low.sp
                         }
-                        candidateSp.sp
                     }
 
                     val hasHorizontalOverflow = scrollState.maxValue > 0
-                    val fadeLeft = scrollState.value > 0
-                    val fadeRight = scrollState.value < scrollState.maxValue
+                    val fadeLeft = hasHorizontalOverflow && scrollState.value < scrollState.maxValue
+                    val fadeRight = hasHorizontalOverflow && scrollState.value > 0
 
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clipToBounds()
                             .then(
-                                if (hasHorizontalOverflow && (fadeLeft || fadeRight)) {
+                                if (fadeLeft || fadeRight) {
                                     Modifier
                                         .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                                         .drawWithContent {
                                             drawContent()
-                                            val fadePx = 22.dp.toPx().coerceAtMost(size.width * 0.16f)
+                                            val fadePx = 24.dp.toPx().coerceAtMost(size.width * 0.16f)
                                             if (fadeLeft && fadePx > 0f) {
                                                 drawRect(
                                                     brush = Brush.horizontalGradient(
@@ -504,36 +702,35 @@ fun CalculatorDisplay(
                                     Modifier
                                 }
                             )
-                            .horizontalScroll(scrollState),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SelectionContainer {
-                            AnimatedContent(
-                                targetState = state.isResultDisplayed,
-                                transitionSpec = {
-                                    if (targetState && !initialState) {
-                                        (slideInVertically { it / 2 } + fadeIn(tween(130))) togetherWith
-                                            (slideOutVertically { -it / 3 } + fadeOut(tween(90)))
-                                    } else {
-                                        fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                    }
-                                },
-                                label = "main_display_transition"
-                            ) { isRes ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(scrollState, reverseScrolling = true),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SelectionContainer {
                                 Text(
                                     text = mainDisplayText,
                                     style = baseDisplayStyle.copy(
                                         fontSize = dynamicFontSize,
                                         lineHeight = dynamicFontSize * 1.15f,
                                         letterSpacing = 0.25.sp,
-                                        fontWeight = if (isRes) FontWeight.Medium else FontWeight.Normal
+                                        fontWeight = activeFontWeight
                                     ),
                                     color = displayTextColor,
                                     maxLines = 1,
                                     softWrap = false,
                                     modifier = Modifier
-                                        .padding(horizontal = if (hasHorizontalOverflow) 4.dp else 0.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .graphicsLayer {
+                                            val p = resultRevealAnim.value
+                                            if (p < 1f) {
+                                                alpha = 0.25f + 0.75f * p
+                                                translationY = (1f - p) * 14.dp.toPx()
+                                            }
+                                        }
                                         .testTag("calculator_main_display")
                                 )
                             }
@@ -593,20 +790,82 @@ fun CalculatorDisplay(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 34.dp)
+                        .heightIn(min = 38.dp)
                         .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    if (errorText != null) {
-                        Text(
-                            text = errorText,
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.error,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.testTag("calculator_error_text")
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = errorText != null,
+                        enter = fadeIn(tween(150)) +
+                            slideInVertically(
+                                initialOffsetY = { it / 2 },
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ) +
+                            scaleIn(
+                                initialScale = 0.86f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ),
+                        exit = fadeOut(tween(120)) + scaleOut(targetScale = 0.90f)
+                    ) {
+                        val iconPulseScale = 1f + 0.16f * errorFlash.value
+                        val pillContainerColor = lerp(
+                            MaterialTheme.colorScheme.errorContainer,
+                            MaterialTheme.colorScheme.error,
+                            0.18f * errorFlash.value
                         )
-                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = pillContainerColor,
+                            modifier = Modifier.graphicsLayer {
+                                val t = errorTremor.value
+                                if (t > 0f && t < 1f) {
+                                    val decay = (1f - t).pow(1.6f)
+                                    translationX = sin(t * PI.toFloat() * 5f) * 4.dp.toPx() * decay
+                                }
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(7.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .graphicsLayer {
+                                            scaleX = iconPulseScale
+                                            scaleY = iconPulseScale
+                                        }
+                                )
+                                Text(
+                                    text = errorText ?: lastErrorText,
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.testTag("calculator_error_text")
+                                )
+                            }
+                        }
+                    }
+
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = errorText == null,
+                        enter = fadeIn(tween(140)),
+                        exit = fadeOut(tween(90))
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
@@ -661,8 +920,8 @@ fun CalculatorDisplay(
                                 }
                             }
 
-                            if (!state.isResultDisplayed && state.livePreview.isNotEmpty()) {
-                                SelectionContainer {
+                            if (state.showLivePreview && !state.isResultDisplayed && state.livePreview.isNotEmpty()) {
+                                SelectionContainer(modifier = Modifier.weight(1f, fill = false)) {
                                     Text(
                                         text = "= ${state.livePreview}",
                                         style = MaterialTheme.typography.headlineMedium.copy(
@@ -685,6 +944,7 @@ fun CalculatorDisplay(
                     animationSpec = tween(durationMillis = 140),
                     label = "pull_handle_alpha"
                 )
+                val pullHandleCd = stringResource(R.string.cd_pull_handle)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -701,24 +961,18 @@ fun CalculatorDisplay(
                                 onToggleTopHistory()
                             }
                         )
-                        .padding(top = 6.dp, bottom = 4.dp)
+                        .semantics { contentDescription = pullHandleCd }
+                        .padding(top = 6.dp, bottom = 5.dp)
                         .testTag("top_history_pull_handle"),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(40.dp)
+                            .width(42.dp)
                             .height(4.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.outlineVariant)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.cd_pull_handle),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
@@ -1073,14 +1327,15 @@ private fun FeedbackTogglePill(
     vibrationEnabled: Boolean,
     onToggleSound: () -> Unit,
     onToggleVibration: () -> Unit,
-    onQuickToggleAll: () -> Unit
+    onQuickToggleAll: () -> Unit,
+    onOpenSettings: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val anyEnabled = soundEnabled || vibrationEnabled
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
+    val pressScaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.90f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -1088,13 +1343,83 @@ private fun FeedbackTogglePill(
         ),
         label = "feedback_press_scale"
     )
-    val bgColor = if (anyEnabled) {
-        MaterialTheme.colorScheme.surfaceContainerHighest
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerLow
-    }
+    // Mix factors animate only when sound/vibration toggles, so theme changes snap in 1 frame with zero color lag
+    val anyMix by animateFloatAsState(
+        targetValue = if (anyEnabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 200),
+        label = "feedback_pill_bg_mix"
+    )
+    val soundMix by animateFloatAsState(
+        targetValue = if (soundEnabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 210),
+        label = "feedback_sound_mix"
+    )
+    val vibMix by animateFloatAsState(
+        targetValue = if (vibrationEnabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 210),
+        label = "feedback_vibration_mix"
+    )
+
+    val bgColor = lerp(
+        MaterialTheme.colorScheme.surfaceContainerLow,
+        MaterialTheme.colorScheme.surfaceContainerHighest,
+        anyMix
+    )
     val activeTint = MaterialTheme.colorScheme.primary
-    val inactiveTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    val inactiveTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.40f)
+    val soundTint = lerp(inactiveTint, activeTint, soundMix)
+    val vibrationTint = lerp(inactiveTint, activeTint, vibMix)
+
+    val soundEnablePulse = remember { Animatable(1f) }
+    val soundEnableTilt = remember { Animatable(0f) }
+    var prevSoundEnabled by remember { mutableStateOf(soundEnabled) }
+    LaunchedEffect(soundEnabled) {
+        if (soundEnabled && !prevSoundEnabled) {
+            launch {
+                soundEnablePulse.snapTo(0.84f)
+                soundEnablePulse.animateTo(
+                    targetValue = 1.26f,
+                    animationSpec = spring(
+                        dampingRatio = 0.45f,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+                soundEnablePulse.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+            launch {
+                soundEnableTilt.snapTo(0f)
+                soundEnableTilt.animateTo(-14f, tween(90))
+                soundEnableTilt.animateTo(
+                    targetValue = 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+            }
+        }
+        prevSoundEnabled = soundEnabled
+    }
+
+    val vibEnableAnim = remember { Animatable(0f) }
+    var prevVibrationEnabled by remember { mutableStateOf(vibrationEnabled) }
+    LaunchedEffect(vibrationEnabled) {
+        if (vibrationEnabled && !prevVibrationEnabled) {
+            vibEnableAnim.snapTo(0f)
+            vibEnableAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 420, easing = LinearEasing)
+            )
+            vibEnableAnim.snapTo(0f)
+        }
+        prevVibrationEnabled = vibrationEnabled
+    }
 
     Box {
         Surface(
@@ -1103,8 +1428,9 @@ private fun FeedbackTogglePill(
             modifier = Modifier
                 .height(36.dp)
                 .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
+                    val s = pressScaleState.value
+                    scaleX = s
+                    scaleY = s
                 }
                 .clip(CircleShape)
                 .combinedClickable(
@@ -1120,24 +1446,67 @@ private fun FeedbackTogglePill(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Icon(
-                    imageVector = if (soundEnabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
-                    contentDescription = stringResource(R.string.cd_feedback_toggle),
-                    tint = if (soundEnabled) activeTint else inactiveTint,
-                    modifier = Modifier.size(16.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer {
+                            scaleX = soundEnablePulse.value
+                            scaleY = soundEnablePulse.value
+                            rotationZ = soundEnableTilt.value
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = soundEnabled,
+                        transitionSpec = {
+                            (fadeIn(tween(180)) + scaleIn(
+                                initialScale = 0.72f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            )) togetherWith (fadeOut(tween(120)) + scaleOut(targetScale = 0.72f))
+                        },
+                        label = "feedback_sound_icon"
+                    ) { enabled ->
+                        Icon(
+                            imageVector = if (enabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
+                            contentDescription = stringResource(R.string.cd_feedback_toggle),
+                            tint = soundTint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
                 Box(
                     modifier = Modifier
                         .width(1.dp)
                         .height(13.dp)
                         .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                 )
-                Icon(
-                    imageVector = Icons.Rounded.Vibration,
-                    contentDescription = null,
-                    tint = if (vibrationEnabled) activeTint else inactiveTint,
-                    modifier = Modifier.size(16.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .graphicsLayer {
+                            val t = vibEnableAnim.value
+                            if (t > 0f && t < 1f) {
+                                val decay = (1f - t).pow(1.25f)
+                                val wave = sin(t * PI.toFloat() * 5f)
+                                translationX = wave * 2.4.dp.toPx() * decay
+                                rotationZ = wave * 11f * decay
+                                val pop = 1f + 0.24f * sin(t * PI.toFloat())
+                                scaleX = pop
+                                scaleY = pop
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    VibrationStatusIcon(
+                        enabled = vibrationEnabled,
+                        tint = vibrationTint,
+                        gapColor = bgColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
@@ -1157,6 +1526,7 @@ private fun FeedbackTogglePill(
                     icon = if (soundEnabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
                     label = stringResource(R.string.feedback_sound_label),
                     checked = soundEnabled,
+                    isVibrationRow = false,
                     onToggle = onToggleSound,
                     testTag = "feedback_menu_sound_row"
                 )
@@ -1164,11 +1534,93 @@ private fun FeedbackTogglePill(
                     icon = Icons.Rounded.Vibration,
                     label = stringResource(R.string.feedback_vibration_label),
                     checked = vibrationEnabled,
+                    isVibrationRow = true,
                     onToggle = onToggleVibration,
                     testTag = "feedback_menu_vibration_row"
                 )
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            menuExpanded = false
+                            onOpenSettings()
+                        }
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .testTag("feedback_menu_open_settings"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_open_all),
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+fun VibrationStatusIcon(
+    enabled: Boolean,
+    tint: Color,
+    gapColor: Color,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null
+) {
+    val slashProgress by animateFloatAsState(
+        targetValue = if (enabled) 0f else 1f,
+        animationSpec = tween(durationMillis = 220),
+        label = "vibration_slash_progress"
+    )
+    Box(
+        modifier = modifier.drawWithContent {
+            drawContent()
+            if (slashProgress > 0.01f) {
+                val start = Offset(size.width * 0.14f, size.height * 0.14f)
+                val fullEnd = Offset(size.width * 0.86f, size.height * 0.86f)
+                val end = Offset(
+                    x = start.x + (fullEnd.x - start.x) * slashProgress,
+                    y = start.y + (fullEnd.y - start.y) * slashProgress
+                )
+                val gapShift = 0.95.dp.toPx()
+                drawLine(
+                    color = gapColor,
+                    start = Offset(start.x + gapShift, start.y - gapShift),
+                    end = Offset(end.x + gapShift, end.y - gapShift),
+                    strokeWidth = 3.0.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = tint,
+                    start = start,
+                    end = end,
+                    strokeWidth = 1.75.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+            }
+        },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Vibration,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
@@ -1177,9 +1629,34 @@ private fun FeedbackMenuSwitchRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     checked: Boolean,
+    isVibrationRow: Boolean,
     onToggle: () -> Unit,
     testTag: String
 ) {
+    val checkedMix by animateFloatAsState(
+        targetValue = if (checked) 1f else 0f,
+        animationSpec = tween(durationMillis = 200),
+        label = "menu_row_icon_mix"
+    )
+    val iconTint = lerp(
+        MaterialTheme.colorScheme.onSurfaceVariant,
+        MaterialTheme.colorScheme.primary,
+        checkedMix
+    )
+    val toggleAnim = remember { Animatable(0f) }
+    var prevChecked by remember { mutableStateOf(checked) }
+    LaunchedEffect(checked) {
+        if (checked && !prevChecked) {
+            toggleAnim.snapTo(0f)
+            toggleAnim.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 360, easing = LinearEasing)
+            )
+            toggleAnim.snapTo(0f)
+        }
+        prevChecked = checked
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1190,12 +1667,37 @@ private fun FeedbackMenuSwitchRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(19.dp)
-        )
+        val iconModifier = Modifier
+            .size(19.dp)
+            .graphicsLayer {
+                val t = toggleAnim.value
+                if (t > 0f && t < 1f) {
+                    val pop = 1f + 0.24f * sin(t * PI.toFloat())
+                    scaleX = pop
+                    scaleY = pop
+                    if (isVibrationRow) {
+                        val decay = (1f - t).pow(1.2f)
+                        rotationZ = sin(t * PI.toFloat() * 5f) * 11f * decay
+                    } else {
+                        rotationZ = -12f * sin(t * PI.toFloat())
+                    }
+                }
+            }
+        if (isVibrationRow) {
+            VibrationStatusIcon(
+                enabled = checked,
+                tint = iconTint,
+                gapColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = iconModifier
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = iconModifier
+            )
+        }
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
@@ -1212,17 +1714,17 @@ private fun FeedbackMenuSwitchRow(
 @Composable
 private fun ThemeModeChip(
     themeMode: ThemeMode,
+    onPositioned: ((Offset) -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val label = when (themeMode) {
-        ThemeMode.SYSTEM -> stringResource(R.string.theme_system)
         ThemeMode.LIGHT -> stringResource(R.string.theme_light)
         ThemeMode.DARK -> stringResource(R.string.theme_dark)
     }
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
+    val pressScaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.92f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -1231,15 +1733,51 @@ private fun ThemeModeChip(
         label = "theme_chip_scale"
     )
     val chipBgColor = MaterialTheme.colorScheme.surfaceContainerHighest
+    val iconSpin = remember { Animatable(0f) }
+    val switchBurst = remember { Animatable(0f) }
+    var prevThemeMode by remember { mutableStateOf(themeMode) }
+
+    LaunchedEffect(themeMode) {
+        if (themeMode != prevThemeMode) {
+            prevThemeMode = themeMode
+            launch {
+                val startDeg = iconSpin.value
+                iconSpin.animateTo(
+                    targetValue = startDeg + 360f,
+                    animationSpec = spring(
+                        dampingRatio = 0.64f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+            launch {
+                switchBurst.snapTo(1f)
+                switchBurst.animateTo(0f, tween(durationMillis = 360, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)))
+            }
+        }
+    }
 
     Surface(
         shape = CircleShape,
         color = chipBgColor,
         modifier = Modifier
             .height(36.dp)
+            .onGloballyPositioned { coords ->
+                if (coords.isAttached) {
+                    val pos = coords.positionInRoot()
+                    onPositioned?.invoke(
+                        Offset(
+                            x = pos.x + coords.size.width * 0.5f,
+                            y = pos.y + coords.size.height * 0.5f
+                        )
+                    )
+                }
+            }
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                val burstScale = 1f + 0.06f * sin(switchBurst.value * PI.toFloat())
+                val s = pressScaleState.value * burstScale
+                scaleX = s
+                scaleY = s
             }
             .clip(CircleShape)
             .clickable(
@@ -1254,33 +1792,47 @@ private fun ThemeModeChip(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            AnimatedContent(
-                targetState = themeMode,
-                transitionSpec = {
-                    (fadeIn(tween(130)) + scaleIn(
-                        initialScale = 0.7f,
-                        animationSpec = tween(130)
-                    )) togetherWith (fadeOut(tween(90)) + scaleOut(targetScale = 0.7f))
-                },
-                label = "theme_icon"
-            ) { mode ->
-                val icon = when (mode) {
-                    ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                    ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                    ThemeMode.DARK -> Icons.Rounded.DarkMode
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer {
+                        rotationZ = iconSpin.value
+                        val pop = 1f + 0.25f * sin(switchBurst.value * PI.toFloat())
+                        scaleX = pop
+                        scaleY = pop
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                AnimatedContent(
+                    targetState = themeMode,
+                    transitionSpec = {
+                        (fadeIn(tween(180)) + scaleIn(
+                            initialScale = 0.55f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )) togetherWith (fadeOut(tween(110)) + scaleOut(targetScale = 0.55f))
+                    },
+                    label = "theme_icon"
+                ) { mode ->
+                    val icon = when (mode) {
+                        ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                        ThemeMode.DARK -> Icons.Rounded.DarkMode
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = stringResource(R.string.cd_theme_button),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
-                Icon(
-                    imageVector = icon,
-                    contentDescription = stringResource(R.string.cd_theme_button),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
             }
             AnimatedContent(
                 targetState = label,
                 transitionSpec = {
-                    (fadeIn(tween(130)) + slideInVertically { it / 4 }) togetherWith
-                        (fadeOut(tween(90)) + slideOutVertically { -it / 4 })
+                    (fadeIn(tween(170)) + slideInVertically { it / 3 }) togetherWith
+                        (fadeOut(tween(110)) + slideOutVertically { -it / 3 })
                 },
                 label = "theme_label"
             ) { text ->
@@ -1292,4 +1844,130 @@ private fun ThemeModeChip(
             }
         }
     }
+}
+
+@Composable
+fun FeedbackPermissionDialog(
+    onAllow: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val isMediaVolumeZero = remember(context) {
+        runCatching {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            am != null && am.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
+        }.getOrDefault(false)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        icon = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.VolumeUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Vibration,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+            }
+        },
+        title = {
+            Text(
+                text = stringResource(R.string.feedback_permission_title),
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = stringResource(R.string.feedback_permission_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                if (isMediaVolumeZero) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                runCatching {
+                                    context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS))
+                                }
+                            }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.feedback_permission_muted_hint),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onAllow,
+                modifier = Modifier.testTag("feedback_permission_allow_button")
+            ) {
+                Text(text = stringResource(R.string.feedback_permission_allow))
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (isMediaVolumeZero) {
+                    TextButton(
+                        onClick = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_SOUND_SETTINGS))
+                            }
+                        }
+                    ) {
+                        Text(text = stringResource(R.string.feedback_permission_system_settings))
+                    }
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("feedback_permission_deny_button")
+                ) {
+                    Text(text = stringResource(R.string.feedback_permission_deny))
+                }
+            }
+        }
+    )
 }

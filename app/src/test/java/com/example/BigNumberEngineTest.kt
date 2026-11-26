@@ -86,4 +86,13 @@ class BigNumberEngineTest {
         val negSqrt = ExpressionEvaluator.evaluate("√(−9)", AngleUnit.DEG)
         assertTrue(negSqrt is EvaluationResult.Error && negSqrt.errorType == MathErrorType.DOMAIN_ERROR)
     }
+
+    @Test
+    fun `lowercase e followed by operator evaluates as Euler constant`() {
+        val result = ExpressionEvaluator.evaluate("2e+3", AngleUnit.DEG)
+        assertTrue(result is EvaluationResult.Success)
+        val success = result as EvaluationResult.Success
+        val expected = BigDecimal("8.4365636569")
+        assertTrue((success.value - expected).abs() < BigDecimal("0.0001"))
+    }
 }

@@ -6,15 +6,23 @@ import android.os.Build
 import android.os.Bundle
 import android.view.Display
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ai.configureAppCheck
+import com.example.data.preferences.UserPreferencesRepository
 import com.example.ui.CalculatorViewModel
 import com.example.ui.screens.CalculatorScreen
+import com.example.ui.theme.ExpressiveBackgroundDark
+import com.example.ui.theme.ExpressiveBackgroundLight
 import com.example.ui.theme.ExpressiveCalcTheme
+import com.example.ui.theme.ThemeMode
 
 class MainActivity : ComponentActivity() {
 
@@ -28,7 +36,30 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         configureAppCheck(this, intent)
-        enableEdgeToEdge()
+
+        val initialPrefs = UserPreferencesRepository(applicationContext).readInitialPreferencesSync()
+        val initialDark = initialPrefs.themeMode == ThemeMode.DARK
+
+        window.setBackgroundDrawable(
+            (if (initialDark) ExpressiveBackgroundDark else ExpressiveBackgroundLight)
+                .toArgb()
+                .toDrawable()
+        )
+
+        val barStyle = if (initialDark) {
+            SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT
+            )
+        }
+        enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !initialDark
+            isAppearanceLightNavigationBars = !initialDark
+        }
+
         displayManager = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
         displayManager?.registerDisplayListener(displayListener, null)
 
@@ -38,7 +69,8 @@ class MainActivity : ComponentActivity() {
 
             ExpressiveCalcTheme(
                 themeMode = uiState.themeMode,
-                dynamicColor = true
+                dynamicColor = uiState.useDynamicColor,
+                customAccentArgb = uiState.customAccentArgb
             ) {
                 CalculatorScreen(
                     state = uiState,

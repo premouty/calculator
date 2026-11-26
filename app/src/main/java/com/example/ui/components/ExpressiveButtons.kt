@@ -9,7 +9,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -17,9 +16,7 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,17 +28,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
@@ -52,7 +52,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.CalcSoundType
@@ -86,12 +88,13 @@ fun ExpressiveCalcButton(
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 16.dp,
     textStyle: TextStyle? = null,
+    textScale: Float = 1f,
     content: (@Composable () -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val playSound = LocalPlayCalcSound.current
-    val performHaptic = LocalPerformCalcHaptic.current
+    val currentPlaySound by rememberUpdatedState(LocalPlayCalcSound.current)
+    val currentPerformHaptic by rememberUpdatedState(LocalPerformCalcHaptic.current)
 
     val glowPulse = remember(hasGlow) { if (hasGlow) Animatable(0f) else null }
 
@@ -110,17 +113,17 @@ fun ExpressiveCalcButton(
     LaunchedEffect(interactionSource, soundType, glowPulse) {
         interactionSource.interactions.collect { interaction ->
             if (interaction is PressInteraction.Press) {
-                playSound(soundType)
-                performHaptic(soundType)
+                currentPlaySound(soundType)
+                currentPerformHaptic(soundType)
                 if (glowPulse != null) {
                     launch {
                         glowPulse.animateTo(
                             targetValue = 1f,
-                            animationSpec = tween(durationMillis = 55)
+                            animationSpec = tween(durationMillis = 48)
                         )
                         glowPulse.animateTo(
                             targetValue = 0f,
-                            animationSpec = tween(durationMillis = 360, easing = GlowFadeEasing)
+                            animationSpec = tween(durationMillis = 320, easing = GlowFadeEasing)
                         )
                     }
                 }
@@ -128,23 +131,23 @@ fun ExpressiveCalcButton(
         }
     }
 
-    // Material 3 Expressive snappy shape morphing: pill/circle -> soft rounded square
-    val cornerRadius by animateDpAsState(
+    // Material 3 Expressive snappy shape morphing tuned for 120Hz displays
+    val cornerRadiusState = animateDpAsState(
         targetValue = if (isPressed) pressedCornerRadius else restingCornerRadius,
         animationSpec = if (isPressed) {
-            spring(dampingRatio = 0.85f, stiffness = 3400f)
+            spring(dampingRatio = 0.82f, stiffness = 3600f)
         } else {
-            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = 1100f)
+            spring(dampingRatio = 0.62f, stiffness = 1150f)
         },
         label = "button_corner_morph"
     )
 
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = if (isPressed) 0.94f else 1f,
         animationSpec = if (isPressed) {
-            spring(dampingRatio = 0.85f, stiffness = 3400f)
+            spring(dampingRatio = 0.82f, stiffness = 3600f)
         } else {
-            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = 1100f)
+            spring(dampingRatio = 0.62f, stiffness = 1150f)
         },
         label = "button_scale"
     )
@@ -179,14 +182,14 @@ fun ExpressiveCalcButton(
         CalcButtonRole.SCIENTIFIC_ACTIVE -> MaterialTheme.colorScheme.onPrimaryContainer
     }
 
-    val containerColor by animateColorAsState(
+    val containerColorState = animateColorAsState(
         targetValue = targetContainerColor,
-        animationSpec = tween(durationMillis = 60),
+        animationSpec = tween(durationMillis = 55),
         label = "button_bg"
     )
     val contentColor by animateColorAsState(
         targetValue = targetContentColor,
-        animationSpec = tween(durationMillis = 60),
+        animationSpec = tween(durationMillis = 55),
         label = "button_fg"
     )
 
@@ -210,7 +213,29 @@ fun ExpressiveCalcButton(
         }
     }
 
-    val shape = RoundedCornerShape(cornerRadius)
+    // Dynamic Shape reads cornerRadiusState during outline/draw phase so press morphing avoids recomposition
+    val dynamicShape = remember(cornerRadiusState) {
+        object : Shape {
+            override fun createOutline(
+                size: Size,
+                layoutDirection: LayoutDirection,
+                density: Density
+            ): Outline {
+                val r = with(density) { cornerRadiusState.value.toPx() }
+                    .coerceIn(0f, minOf(size.width, size.height) / 2f)
+                return Outline.Rounded(
+                    RoundRect(
+                        left = 0f,
+                        top = 0f,
+                        right = size.width,
+                        bottom = size.height,
+                        cornerRadius = CornerRadius(r, r)
+                    )
+                )
+            }
+        }
+    }
+
     val clickIndication = ripple(bounded = true, color = contentColor.copy(alpha = 0.20f))
 
     val clickModifier = if (onLongClick != null) {
@@ -220,7 +245,7 @@ fun ExpressiveCalcButton(
             role = Role.Button,
             onClick = onClick,
             onLongClick = {
-                performHaptic(CalcSoundType.UTILITY)
+                currentPerformHaptic(CalcSoundType.UTILITY)
                 onLongClick()
             }
         )
@@ -236,51 +261,42 @@ fun ExpressiveCalcButton(
     Box(
         modifier = modifier
             .minimumInteractiveComponentSize()
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = scaleState.value
+                scaleX = s
+                scaleY = s
             }
             .then(
                 if (hasGlow && glowPulse != null) {
                     Modifier.drawBehind {
                         val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
                         val basePeakAlpha = when {
-                            role == CalcButtonRole.EQUALS && isDark -> 0.38f
-                            role == CalcButtonRole.EQUALS -> 0.32f
-                            isDark -> 0.26f
-                            else -> 0.22f
+                            role == CalcButtonRole.EQUALS && isDark -> 0.40f
+                            role == CalcButtonRole.EQUALS -> 0.34f
+                            isDark -> 0.28f
+                            else -> 0.23f
                         }
-                        val peakAlpha = basePeakAlpha + pulse * 0.18f
-                        val spreadPx = (14.dp + (pulse * 6f).dp).toPx()
+                        val peakAlpha = basePeakAlpha + pulse * 0.20f
+                        val maxSpreadPx = (9.dp + (pulse * 5.5f).dp).toPx()
 
-                        val halfW = size.width / 2f
-                        val halfH = size.height / 2f
-                        val radiusX = halfW + spreadPx
-                        val radiusY = halfH + spreadPx
-                        val baseRadius = maxOf(radiusX, radiusY).coerceAtLeast(1f)
-                        val scaleXRatio = radiusX / baseRadius
-                        val scaleYRatio = radiusY / baseRadius
+                        val minHalf = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
+                        val clampedCornerPx = cornerRadiusState.value.toPx().coerceIn(0f, minHalf)
+                        val roundness = (clampedCornerPx / minHalf).coerceIn(0f, 1f)
+                        // Pill keeps exact capsule offset (1.0x expand); Squircle & Sharp hug their tighter corners
+                        val cornerExpandRatio = 0.56f + 0.44f * roundness
 
-                        withTransform({
-                            scale(
-                                scaleX = scaleXRatio,
-                                scaleY = scaleYRatio,
-                                pivot = Offset(halfW, halfH)
-                            )
-                        }) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    0.00f to softGlowColor.copy(alpha = peakAlpha),
-                                    0.56f to softGlowColor.copy(alpha = peakAlpha * 0.78f),
-                                    0.78f to softGlowColor.copy(alpha = peakAlpha * 0.40f),
-                                    0.92f to softGlowColor.copy(alpha = peakAlpha * 0.12f),
-                                    1.00f to Color.Transparent,
-                                    center = Offset(halfW, halfH),
-                                    radius = baseRadius
-                                ),
-                                center = Offset(halfW, halfH),
-                                radius = baseRadius
+                        val steps = 7
+                        for (i in steps downTo 1) {
+                            val t = i.toFloat() / steps.toFloat()
+                            val expand = maxSpreadPx * t
+                            val falloff = (1f - t * 0.88f)
+                            val layerAlpha = (peakAlpha * 0.42f * falloff * falloff).coerceIn(0f, 1f)
+                            val layerCorner = (clampedCornerPx + expand * cornerExpandRatio).coerceAtLeast(0f)
+                            drawRoundRect(
+                                color = softGlowColor.copy(alpha = layerAlpha),
+                                topLeft = Offset(-expand, -expand),
+                                size = Size(size.width + expand * 2f, size.height + expand * 2f),
+                                cornerRadius = CornerRadius(layerCorner, layerCorner)
                             )
                         }
                     }
@@ -288,13 +304,16 @@ fun ExpressiveCalcButton(
                     Modifier
                 }
             )
-            .clip(shape)
-            .background(containerColor)
+            .clip(dynamicShape)
+            .drawBehind {
+                drawRect(containerColorState.value)
+            }
             .then(
                 if (hasGlow && glowPulse != null) {
                     Modifier.drawBehind {
                         val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
-                        val cornerPx = cornerRadius.toPx()
+                        val minHalf = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
+                        val clampedCornerPx = cornerRadiusState.value.toPx().coerceIn(0f, minHalf)
 
                         // Gentle top-down atmospheric inner sheen
                         val topSheenAlpha = (if (role == CalcButtonRole.EQUALS) 0.18f else 0.14f) + pulse * 0.14f
@@ -306,36 +325,33 @@ fun ExpressiveCalcButton(
                             )
                         )
 
-                        // Soft centered inner luminescence matching the pill's proportions
-                        val halfW = size.width / 2f
-                        val halfH = size.height / 2f
-                        val baseRadius = maxOf(halfW, halfH).coerceAtLeast(1f)
-                        val innerPulseAlpha = (if (role == CalcButtonRole.EQUALS) 0.10f else 0.07f) + pulse * 0.14f
-                        withTransform({
-                            scale(
-                                scaleX = halfW / baseRadius,
-                                scaleY = halfH / baseRadius,
-                                pivot = Offset(halfW, halfH)
+                        // Shape-matched centered inner luminescence (adapts accurately to Pill, Squircle & Sharp)
+                        val innerPulseAlpha = (if (role == CalcButtonRole.EQUALS) 0.09f else 0.06f) + pulse * 0.13f
+                        val inset1 = 4.dp.toPx()
+                        if (size.width > inset1 * 2f && size.height > inset1 * 2f) {
+                            val innerCorner1 = (clampedCornerPx - inset1 * 0.85f).coerceAtLeast(0f)
+                            drawRoundRect(
+                                color = innerTintColor.copy(alpha = innerPulseAlpha * 0.55f),
+                                topLeft = Offset(inset1, inset1),
+                                size = Size(size.width - inset1 * 2f, size.height - inset1 * 2f),
+                                cornerRadius = CornerRadius(innerCorner1, innerCorner1)
                             )
-                        }) {
-                            drawCircle(
-                                brush = Brush.radialGradient(
-                                    0.0f to innerTintColor.copy(alpha = innerPulseAlpha),
-                                    0.7f to innerTintColor.copy(alpha = innerPulseAlpha * 0.35f),
-                                    1.0f to Color.Transparent,
-                                    center = Offset(halfW, halfH),
-                                    radius = baseRadius
-                                ),
-                                center = Offset(halfW, halfH),
-                                radius = baseRadius
+                        }
+                        val inset2 = 8.dp.toPx()
+                        if (size.width > inset2 * 2f && size.height > inset2 * 2f) {
+                            val innerCorner2 = (clampedCornerPx - inset2 * 0.85f).coerceAtLeast(0f)
+                            drawRoundRect(
+                                color = innerTintColor.copy(alpha = innerPulseAlpha * 0.45f),
+                                topLeft = Offset(inset2, inset2),
+                                size = Size(size.width - inset2 * 2f, size.height - inset2 * 2f),
+                                cornerRadius = CornerRadius(innerCorner2, innerCorner2)
                             )
                         }
 
-                        // Delicate luminous rim highlight
-                        val clampedCornerPx = cornerPx.coerceAtMost(minOf(size.width, size.height) / 2f)
+                        // Delicate luminous rim highlight matching the button shape
                         val strokePx = 1.25.dp.toPx()
-                        val rimTopAlpha = (if (role == CalcButtonRole.EQUALS) 0.30f else 0.24f) + pulse * 0.22f
-                        val rimBottomAlpha = (if (role == CalcButtonRole.EQUALS) 0.07f else 0.05f) + pulse * 0.10f
+                        val rimTopAlpha = (if (role == CalcButtonRole.EQUALS) 0.32f else 0.25f) + pulse * 0.22f
+                        val rimBottomAlpha = (if (role == CalcButtonRole.EQUALS) 0.08f else 0.06f) + pulse * 0.10f
                         drawRoundRect(
                             brush = Brush.verticalGradient(
                                 0.0f to innerTintColor.copy(alpha = rimTopAlpha),
@@ -369,22 +385,22 @@ fun ExpressiveCalcButton(
                 val resolvedStyle = textStyle ?: when (role) {
                     CalcButtonRole.SCIENTIFIC, CalcButtonRole.SCIENTIFIC_ACTIVE ->
                         MaterialTheme.typography.labelLarge.copy(
-                            fontSize = 13.sp,
+                            fontSize = (12.5f * textScale).sp,
                             fontWeight = FontWeight.Medium
                         )
                     CalcButtonRole.OPERATOR, CalcButtonRole.EQUALS ->
                         MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = 24.sp,
+                            fontSize = (24f * textScale).sp,
                             fontWeight = FontWeight.Normal
                         )
                     CalcButtonRole.UTILITY ->
                         MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 19.sp,
+                            fontSize = (19f * textScale).sp,
                             fontWeight = FontWeight.Medium
                         )
                     else ->
                         MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = 25.sp,
+                            fontSize = (25f * textScale).sp,
                             fontWeight = FontWeight.Normal
                         )
                 }

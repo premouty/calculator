@@ -988,7 +988,7 @@ private fun VoiceRecognitionDockContent(
                         val barWidth = ((size.width - gap * (barCount - 1)) / barCount)
                             .coerceIn(3.dp.toPx(), 6.dp.toPx())
                         val totalContentW = barCount * barWidth + (barCount - 1) * gap
-                        val startX = 0f.coerceAtLeast((size.width - totalContentW) * 0f)
+                        val startX = ((size.width - totalContentW) * 0.5f).coerceAtLeast(0f)
                         val midY = size.height / 2f
 
                         for (i in 0 until barCount) {

@@ -103,16 +103,18 @@ object NumberFormatter {
                     } else if (c == '.' && !hasDot) {
                         hasDot = true
                         i++
-                    } else if ((c == 'E' || c == 'e') && i > start && i + 1 < rawExpression.length) {
+                    } else if (c == 'E' && i > start && i + 1 < rawExpression.length) {
                         // Scientific literal e.g. 1.5E10 or 1.5E-10
                         val next = rawExpression[i + 1]
-                        if (next.isDigit() || next == '-' || next == '+') {
-                            sb.append(rawExpression.substring(start, i))
-                            while (i < rawExpression.length && (rawExpression[i] == 'E' || rawExpression[i] == 'e' || rawExpression[i] == '-' || rawExpression[i] == '+' || rawExpression[i].isDigit())) {
-                                // Only consume sign immediately after E
-                                if ((rawExpression[i] == '-' || rawExpression[i] == '+') && rawExpression[i - 1] != 'E' && rawExpression[i - 1] != 'e') {
-                                    break
-                                }
+                        if (next.isDigit() || ((next == '-' || next == '+') && i + 2 < rawExpression.length && rawExpression[i + 2].isDigit())) {
+                            sb.append(formatGroupedNumberString(rawExpression.substring(start, i)))
+                            sb.append(rawExpression[i]) // 'E'
+                            i++
+                            if (i < rawExpression.length && (rawExpression[i] == '-' || rawExpression[i] == '+')) {
+                                sb.append(rawExpression[i])
+                                i++
+                            }
+                            while (i < rawExpression.length && rawExpression[i].isDigit()) {
                                 sb.append(rawExpression[i])
                                 i++
                             }
@@ -126,7 +128,7 @@ object NumberFormatter {
                 }
                 if (i > start) {
                     val token = rawExpression.substring(start, i)
-                    if (!token.contains('E') && !token.contains('e')) {
+                    if (!token.contains('E')) {
                         sb.append(formatGroupedNumberString(token))
                     }
                 }

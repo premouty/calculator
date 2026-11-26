@@ -9,6 +9,13 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.View
+import androidx.annotation.RequiresApi
+
+enum class HapticIntensity {
+    LIGHT,
+    MEDIUM,
+    STRONG
+}
 
 class CalcVibrator(context: Context) {
 
@@ -22,21 +29,28 @@ class CalcVibrator(context: Context) {
         }
     }.getOrNull()
 
-    fun vibrate(type: CalcSoundType, enabled: Boolean, view: View? = null) {
+    fun vibrate(
+        type: CalcSoundType,
+        enabled: Boolean,
+        intensity: HapticIntensity = HapticIntensity.MEDIUM,
+        view: View? = null
+    ) {
         if (!enabled) return
 
         val vib = vibrator
         val hardwareVibrated = if (vib != null && vib.hasVibrator()) {
             runCatching {
-                when {
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O -> {
-                        val effect = createEffectForApi26Plus(vib, type)
-                        vibrateEffect(vib, effect)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = createEffectForApi26Plus(vib, type, intensity)
+                    vibrateEffect(vib, effect)
+                } else {
+                    val legacyMs = when (intensity) {
+                        HapticIntensity.LIGHT -> if (type == CalcSoundType.EQUALS) 20L else 10L
+                        HapticIntensity.MEDIUM -> if (type == CalcSoundType.EQUALS) 36L else 20L
+                        HapticIntensity.STRONG -> if (type == CalcSoundType.EQUALS) 52L else 30L
                     }
-                    else -> {
-                        @Suppress("DEPRECATION")
-                        vib.vibrate(if (type == CalcSoundType.EQUALS) 32L else 18L)
-                    }
+                    @Suppress("DEPRECATION")
+                    vib.vibrate(legacyMs)
                 }
                 true
             }.getOrDefault(false)
@@ -49,31 +63,52 @@ class CalcVibrator(context: Context) {
         }
     }
 
-    private fun createEffectForApi26Plus(vib: Vibrator, type: CalcSoundType): VibrationEffect {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val effectId = when (type) {
-                CalcSoundType.DIGIT -> VibrationEffect.EFFECT_CLICK
-                CalcSoundType.OPERATOR -> VibrationEffect.EFFECT_CLICK
-                CalcSoundType.UTILITY -> VibrationEffect.EFFECT_CLICK
-                CalcSoundType.EQUALS -> VibrationEffect.EFFECT_HEAVY_CLICK
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun createEffectForApi26Plus(
+        vib: Vibrator,
+        type: CalcSoundType,
+        intensity: HapticIntensity
+    ): VibrationEffect {
+        val durationMs = when (intensity) {
+            HapticIntensity.LIGHT -> when (type) {
+                CalcSoundType.DIGIT -> 10L
+                CalcSoundType.OPERATOR -> 14L
+                CalcSoundType.UTILITY -> 12L
+                CalcSoundType.EQUALS -> 22L
             }
-            if (vib.areAllEffectsSupported(effectId) == Vibrator.VIBRATION_EFFECT_SUPPORT_YES) {
-                return VibrationEffect.createPredefined(effectId)
+            HapticIntensity.MEDIUM -> when (type) {
+                CalcSoundType.DIGIT -> 18L
+                CalcSoundType.OPERATOR -> 24L
+                CalcSoundType.UTILITY -> 22L
+                CalcSoundType.EQUALS -> 38L
             }
-        }
-
-        val durationMs = when (type) {
-            CalcSoundType.DIGIT -> 18L
-            CalcSoundType.OPERATOR -> 24L
-            CalcSoundType.UTILITY -> 24L
-            CalcSoundType.EQUALS -> 36L
+            HapticIntensity.STRONG -> when (type) {
+                CalcSoundType.DIGIT -> 28L
+                CalcSoundType.OPERATOR -> 36L
+                CalcSoundType.UTILITY -> 32L
+                CalcSoundType.EQUALS -> 54L
+            }
         }
         val amplitude = if (vib.hasAmplitudeControl()) {
-            when (type) {
-                CalcSoundType.DIGIT -> 140
-                CalcSoundType.OPERATOR -> 185
-                CalcSoundType.UTILITY -> 185
-                CalcSoundType.EQUALS -> 240
+            when (intensity) {
+                HapticIntensity.LIGHT -> when (type) {
+                    CalcSoundType.DIGIT -> 85
+                    CalcSoundType.OPERATOR -> 115
+                    CalcSoundType.UTILITY -> 100
+                    CalcSoundType.EQUALS -> 145
+                }
+                HapticIntensity.MEDIUM -> when (type) {
+                    CalcSoundType.DIGIT -> 175
+                    CalcSoundType.OPERATOR -> 215
+                    CalcSoundType.UTILITY -> 200
+                    CalcSoundType.EQUALS -> 255
+                }
+                HapticIntensity.STRONG -> when (type) {
+                    CalcSoundType.DIGIT -> 235
+                    CalcSoundType.OPERATOR -> 255
+                    CalcSoundType.UTILITY -> 245
+                    CalcSoundType.EQUALS -> 255
+                }
             }
         } else {
             VibrationEffect.DEFAULT_AMPLITUDE
@@ -81,16 +116,17 @@ class CalcVibrator(context: Context) {
         return VibrationEffect.createOneShot(durationMs, amplitude)
     }
 
+    @RequiresApi(Build.VERSION_CODES.O)
     private fun vibrateEffect(vib: Vibrator, effect: VibrationEffect) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val attrs = VibrationAttributes.Builder()
-                .setUsage(VibrationAttributes.USAGE_TOUCH)
+                .setUsage(VibrationAttributes.USAGE_MEDIA)
                 .build()
             vib.vibrate(effect, attrs)
         } else {
             @Suppress("DEPRECATION")
             val audioAttrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
             @Suppress("DEPRECATION")

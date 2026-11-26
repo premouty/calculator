@@ -74,10 +74,10 @@ object ExpressionEvaluator {
                         } else if (c == '.' && !hasDot) {
                             hasDot = true
                             i++
-                        } else if ((c == 'E' || c == 'e') && i + 1 < expr.length) {
+                        } else if (c == 'E' && i + 1 < expr.length) {
                             val next = expr[i + 1]
                             if (next.isDigit() || ((next == '+' || next == '-') && i + 2 < expr.length && expr[i + 2].isDigit())) {
-                                i++ // consume E/e
+                                i++ // consume E
                                 if (expr[i] == '+' || expr[i] == '-') i++
                                 while (i < expr.length && expr[i].isDigit()) i++
                             }

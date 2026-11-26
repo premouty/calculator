@@ -4,7 +4,6 @@ import com.example.data.preferences.AngleUnit
 import com.example.domain.math.EvaluationResult
 import com.example.domain.math.ExpressionEvaluator
 import com.example.domain.math.NumberFormatter
-import com.example.domain.ocr.MathExpressionOcrParser
 
 data class ParsedVoiceMath(
     val rawExpression: String,
@@ -144,15 +143,12 @@ object SpokenMathParser {
         // Fix prefix factorial: "! 5" -> "5!"
         val factorialFixed = joined.replace(Regex("!\\s+(\\d+(?:\\.\\d+)?)"), "$1!")
 
-        val normalized = MathExpressionOcrParser.normalizeAiExpression(
-            rawExpr = factorialFixed,
-            angleUnit = angleUnit
-        ) ?: return null
+        val normalizedRaw = normalizeSpokenExpression(factorialFixed) ?: return null
 
         val balancedRaw = buildString {
-            append(normalized.rawExpression)
-            val openCount = normalized.rawExpression.count { it == '(' }
-            val closeCount = normalized.rawExpression.count { it == ')' }
+            append(normalizedRaw)
+            val openCount = normalizedRaw.count { it == '(' }
+            val closeCount = normalizedRaw.count { it == ')' }
             repeat((openCount - closeCount).coerceAtLeast(0)) {
                 append(')')
             }
@@ -160,7 +156,7 @@ object SpokenMathParser {
 
         val evalPreview = when (val res = ExpressionEvaluator.evaluate(balancedRaw, angleUnit)) {
             is EvaluationResult.Success -> res.formatted.displayText
-            else -> normalized.previewResult
+            else -> ""
         }
 
         return ParsedVoiceMath(
@@ -168,6 +164,25 @@ object SpokenMathParser {
             formattedExpression = NumberFormatter.formatExpressionForDisplay(balancedRaw),
             previewResult = evalPreview
         )
+    }
+
+    private fun normalizeSpokenExpression(raw: String): String? {
+        val standardized = raw
+            .replace('*', '×')
+            .replace('/', '÷')
+            .replace('-', '−')
+            .replace(':', '÷')
+            .replace(',', '.')
+
+        val validTokenRegex = Regex("sin⁻¹\\(|cos⁻¹\\(|tan⁻¹\\(|sin\\(|cos\\(|tan\\(|log\\(|ln\\(|√\\(|\\d+(?:\\.\\d+)?|[+−×÷^()%!.]|π|(?<![\\p{L}])e(?![\\p{L}])")
+        val cleaned = buildString {
+            for (match in validTokenRegex.findAll(standardized)) {
+                append(match.value)
+            }
+        }
+        if (cleaned.isEmpty()) return null
+        val hasOperand = cleaned.any { it.isDigit() || it == 'π' || it == 'e' }
+        return if (hasOperand) cleaned else null
     }
 
     private fun tokenizeWordsAndSymbols(input: String): List<String> {
