@@ -1,9 +1,7 @@
 package com.example.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -25,6 +23,7 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -89,6 +88,7 @@ fun ExpressiveCalcButton(
     pressedCornerRadius: Dp = 16.dp,
     textStyle: TextStyle? = null,
     textScale: Float = 1f,
+    contentScaleState: State<Float>? = null,
     content: (@Composable () -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -152,65 +152,75 @@ fun ExpressiveCalcButton(
         label = "button_scale"
     )
 
-    val targetContainerColor = when (role) {
-        CalcButtonRole.DIGIT ->
-            if (isPressed) MaterialTheme.colorScheme.surfaceContainerHighest
-            else MaterialTheme.colorScheme.surfaceContainerHigh
-        CalcButtonRole.OPERATOR ->
-            if (isPressed) MaterialTheme.colorScheme.secondary
-            else MaterialTheme.colorScheme.secondaryContainer
-        CalcButtonRole.UTILITY ->
-            if (isPressed) MaterialTheme.colorScheme.tertiary
-            else MaterialTheme.colorScheme.tertiaryContainer
+    val restingContainerColor = when (role) {
+        CalcButtonRole.DIGIT -> MaterialTheme.colorScheme.surfaceContainerHigh
+        CalcButtonRole.OPERATOR -> MaterialTheme.colorScheme.secondaryContainer
+        CalcButtonRole.UTILITY -> MaterialTheme.colorScheme.tertiaryContainer
         CalcButtonRole.EQUALS -> MaterialTheme.colorScheme.primary
-        CalcButtonRole.SCIENTIFIC ->
-            if (isPressed) MaterialTheme.colorScheme.surfaceContainerHighest
-            else MaterialTheme.colorScheme.surfaceContainer
+        CalcButtonRole.SCIENTIFIC -> MaterialTheme.colorScheme.surfaceContainer
+        CalcButtonRole.SCIENTIFIC_ACTIVE -> MaterialTheme.colorScheme.primaryContainer
+    }
+    val pressedContainerColor = when (role) {
+        CalcButtonRole.DIGIT, CalcButtonRole.SCIENTIFIC -> MaterialTheme.colorScheme.surfaceContainerHighest
+        CalcButtonRole.OPERATOR -> MaterialTheme.colorScheme.secondary
+        CalcButtonRole.UTILITY -> MaterialTheme.colorScheme.tertiary
+        CalcButtonRole.EQUALS -> MaterialTheme.colorScheme.primary
         CalcButtonRole.SCIENTIFIC_ACTIVE -> MaterialTheme.colorScheme.primaryContainer
     }
 
-    val targetContentColor = when (role) {
+    val restingContentColor = when (role) {
         CalcButtonRole.DIGIT -> MaterialTheme.colorScheme.onSurface
-        CalcButtonRole.OPERATOR ->
-            if (isPressed) MaterialTheme.colorScheme.onSecondary
-            else MaterialTheme.colorScheme.onSecondaryContainer
-        CalcButtonRole.UTILITY ->
-            if (isPressed) MaterialTheme.colorScheme.onTertiary
-            else MaterialTheme.colorScheme.onTertiaryContainer
+        CalcButtonRole.OPERATOR -> MaterialTheme.colorScheme.onSecondaryContainer
+        CalcButtonRole.UTILITY -> MaterialTheme.colorScheme.onTertiaryContainer
         CalcButtonRole.EQUALS -> MaterialTheme.colorScheme.onPrimary
         CalcButtonRole.SCIENTIFIC -> MaterialTheme.colorScheme.onSurfaceVariant
         CalcButtonRole.SCIENTIFIC_ACTIVE -> MaterialTheme.colorScheme.onPrimaryContainer
     }
+    val pressedContentColor = when (role) {
+        CalcButtonRole.OPERATOR -> MaterialTheme.colorScheme.onSecondary
+        CalcButtonRole.UTILITY -> MaterialTheme.colorScheme.onTertiary
+        else -> restingContentColor
+    }
 
-    val containerColorState = animateColorAsState(
-        targetValue = targetContainerColor,
+    // Mix factor only animates on press, so theme switches snap in 1 frame with zero running color animations
+    val pressMixState = animateFloatAsState(
+        targetValue = if (isPressed) 1f else 0f,
         animationSpec = tween(durationMillis = 55),
-        label = "button_bg"
+        label = "button_press_mix"
     )
-    val contentColor by animateColorAsState(
-        targetValue = targetContentColor,
-        animationSpec = tween(durationMillis = 55),
-        label = "button_fg"
-    )
+    val contentColor = if (restingContentColor == pressedContentColor) {
+        restingContentColor
+    } else {
+        lerp(restingContentColor, pressedContentColor, pressMixState.value)
+    }
 
     val backgroundColor = MaterialTheme.colorScheme.background
     val primaryContainerColor = MaterialTheme.colorScheme.primaryContainer
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val isDark = remember(backgroundColor) { backgroundColor.luminance() < 0.5f }
-    val rawGlowColor = when (role) {
-        CalcButtonRole.EQUALS -> MaterialTheme.colorScheme.primary
-        CalcButtonRole.UTILITY -> tertiaryColor
-        else -> MaterialTheme.colorScheme.primary
-    }
-    val softGlowColor = remember(rawGlowColor, isDark) {
-        if (isDark) lerp(rawGlowColor, Color.White, 0.18f) else rawGlowColor
-    }
-    val innerTintColor = remember(role, isDark, primaryContainerColor, tertiaryColor) {
-        when (role) {
-            CalcButtonRole.EQUALS -> lerp(primaryContainerColor, Color.White, if (isDark) 0.35f else 0.55f)
-            CalcButtonRole.UTILITY -> lerp(tertiaryColor, Color.White, if (isDark) 0.40f else 0.65f)
-            else -> Color.White
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val isDark = if (hasGlow) remember(backgroundColor) { backgroundColor.luminance() < 0.5f } else false
+    val softGlowColor = if (hasGlow) {
+        val rawGlowColor = when (role) {
+            CalcButtonRole.EQUALS -> primaryColor
+            CalcButtonRole.UTILITY -> tertiaryColor
+            else -> primaryColor
         }
+        remember(rawGlowColor, isDark) {
+            if (isDark) lerp(rawGlowColor, Color.White, 0.18f) else rawGlowColor
+        }
+    } else {
+        Color.Transparent
+    }
+    val innerTintColor = if (hasGlow) {
+        remember(role, isDark, primaryContainerColor, tertiaryColor) {
+            when (role) {
+                CalcButtonRole.EQUALS -> lerp(primaryContainerColor, Color.White, if (isDark) 0.35f else 0.55f)
+                CalcButtonRole.UTILITY -> lerp(tertiaryColor, Color.White, if (isDark) 0.40f else 0.65f)
+                else -> Color.White
+            }
+        }
+    } else {
+        Color.Transparent
     }
 
     // Dynamic Shape reads cornerRadiusState during outline/draw phase so press morphing avoids recomposition
@@ -236,7 +246,7 @@ fun ExpressiveCalcButton(
         }
     }
 
-    val clickIndication = ripple(bounded = true, color = contentColor.copy(alpha = 0.20f))
+    val clickIndication = ripple(bounded = true, color = restingContentColor.copy(alpha = 0.20f))
 
     val clickModifier = if (onLongClick != null) {
         Modifier.combinedClickable(
@@ -306,7 +316,13 @@ fun ExpressiveCalcButton(
             )
             .clip(dynamicShape)
             .drawBehind {
-                drawRect(containerColorState.value)
+                val mix = pressMixState.value
+                val bg = if (mix <= 0.001f || restingContainerColor == pressedContainerColor) {
+                    restingContainerColor
+                } else {
+                    lerp(restingContainerColor, pressedContainerColor, mix)
+                }
+                drawRect(bg)
             }
             .then(
                 if (hasGlow && glowPulse != null) {
@@ -379,39 +395,52 @@ fun ExpressiveCalcButton(
         contentAlignment = Alignment.Center
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
-            if (content != null) {
-                content()
-            } else {
-                val resolvedStyle = textStyle ?: when (role) {
-                    CalcButtonRole.SCIENTIFIC, CalcButtonRole.SCIENTIFIC_ACTIVE ->
-                        MaterialTheme.typography.labelLarge.copy(
-                            fontSize = (12.5f * textScale).sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    CalcButtonRole.OPERATOR, CalcButtonRole.EQUALS ->
-                        MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = (24f * textScale).sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                    CalcButtonRole.UTILITY ->
-                        MaterialTheme.typography.titleMedium.copy(
-                            fontSize = (19f * textScale).sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    else ->
-                        MaterialTheme.typography.headlineMedium.copy(
-                            fontSize = (25f * textScale).sp,
-                            fontWeight = FontWeight.Normal
-                        )
+            Box(
+                modifier = if (contentScaleState != null) {
+                    Modifier.graphicsLayer {
+                        val s = contentScaleState.value
+                        scaleX = s
+                        scaleY = s
+                    }
+                } else {
+                    Modifier
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                if (content != null) {
+                    content()
+                } else {
+                    val resolvedStyle = textStyle ?: when (role) {
+                        CalcButtonRole.SCIENTIFIC, CalcButtonRole.SCIENTIFIC_ACTIVE ->
+                            MaterialTheme.typography.labelLarge.copy(
+                                fontSize = (12.5f * textScale).sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        CalcButtonRole.OPERATOR, CalcButtonRole.EQUALS ->
+                            MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = (24f * textScale).sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        CalcButtonRole.UTILITY ->
+                            MaterialTheme.typography.titleMedium.copy(
+                                fontSize = (19f * textScale).sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        else ->
+                            MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = (25f * textScale).sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                    }
+                    Text(
+                        text = label,
+                        style = resolvedStyle,
+                        color = contentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(PaddingValues(horizontal = 4.dp))
+                    )
                 }
-                Text(
-                    text = label,
-                    style = resolvedStyle,
-                    color = contentColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(PaddingValues(horizontal = 4.dp))
-                )
             }
         }
     }

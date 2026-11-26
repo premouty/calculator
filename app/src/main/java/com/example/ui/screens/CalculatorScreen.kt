@@ -49,12 +49,15 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,20 +67,21 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -91,9 +95,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.preferences.AngleUnit
@@ -144,32 +150,66 @@ fun CalculatorScreen(
     var rootBoxOrigin by remember { mutableStateOf(Offset.Zero) }
     val oldThemeLayer = rememberGraphicsLayer()
     val revealRadiusFraction = remember { Animatable(0f) }
+    var captureOldTheme by remember { mutableStateOf(false) }
     var isThemeRevealing by remember { mutableStateOf(false) }
     var revealOriginRoot by remember { mutableStateOf<Offset?>(null) }
     var revealJob by remember { mutableStateOf<Job?>(null) }
-    val revealClipPath = remember { Path() }
+
+    val revealCircleShape = remember {
+        object : Shape {
+            override fun createOutline(
+                size: Size,
+                layoutDirection: LayoutDirection,
+                density: Density
+            ): Outline {
+                val progress = revealRadiusFraction.value
+                val origin = revealOriginRoot?.let { it - rootBoxOrigin }
+                    ?: Offset(size.width * 0.16f, size.height * 0.08f)
+                val maxRadius = hypot(
+                    maxOf(origin.x, size.width - origin.x),
+                    maxOf(origin.y, size.height - origin.y)
+                ) * 1.02f
+                val r = (maxRadius * progress).coerceAtLeast(1f)
+                return Outline.Rounded(
+                    RoundRect(
+                        left = origin.x - r,
+                        top = origin.y - r,
+                        right = origin.x + r,
+                        bottom = origin.y + r,
+                        cornerRadius = CornerRadius(r, r)
+                    )
+                )
+            }
+        }
+    }
 
     val triggerThemeReveal: (() -> Unit) -> Unit = { applyThemeChange ->
-        if (isThemeRevealing) {
+        if (isThemeRevealing || captureOldTheme) {
             revealJob?.cancel()
             revealJob = null
+            captureOldTheme = false
             isThemeRevealing = false
             applyThemeChange()
         } else {
             revealOriginRoot = themeButtonAnchorRoot
-            isThemeRevealing = true
-            applyThemeChange()
+            captureOldTheme = true
             revealJob = scope.launch {
                 try {
-                    revealRadiusFraction.snapTo(0.01f)
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    revealRadiusFraction.snapTo(0.02f)
+                    isThemeRevealing = true
+                    captureOldTheme = false
+                    applyThemeChange()
                     revealRadiusFraction.animateTo(
                         targetValue = 1f,
                         animationSpec = tween(
-                            durationMillis = 420,
-                            easing = CubicBezierEasing(0.22f, 0.90f, 0.25f, 1.0f)
+                            durationMillis = 360,
+                            easing = CubicBezierEasing(0.22f, 0.88f, 0.26f, 1.0f)
                         )
                     )
                 } finally {
+                    captureOldTheme = false
                     isThemeRevealing = false
                     revealRadiusFraction.snapTo(0f)
                     revealJob = null
@@ -195,11 +235,21 @@ fun CalculatorScreen(
                     }
                 }
         ) {
+            if (isThemeRevealing) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawLayer(oldThemeLayer)
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        clip = isThemeRevealing
+                        shape = if (isThemeRevealing) revealCircleShape else RectangleShape
+                    }
                     .drawWithContent {
-                        if (!isThemeRevealing) {
+                        if (captureOldTheme) {
                             oldThemeLayer.record {
                                 this@drawWithContent.drawContent()
                             }
@@ -213,22 +263,24 @@ fun CalculatorScreen(
                     containerColor = MaterialTheme.colorScheme.background,
                     snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
                 ) { innerPadding ->
-                    var displayCardHeightPx by remember { mutableIntStateOf(0) }
+                    val displayCardHeightPxState = remember { mutableIntStateOf(0) }
                     val density = LocalDensity.current
-                    val quickHistoryMaxHeight = remember(displayCardHeightPx, density) {
-                        if (displayCardHeightPx > 0) {
-                            with(density) { displayCardHeightPx.toDp() }
-                        } else {
-                            240.dp
-                        }
+                    val quickHistoryMaxHeight = if (state.isTopHistoryOpen) {
+                        val px = displayCardHeightPxState.intValue
+                        if (px > 0) with(density) { px.toDp() } else 240.dp
+                    } else {
+                        240.dp
                     }
 
-                    // Single synchronized GPU-friendly progress for scientific panel slide (no child re-squish lag)
-                    val scientificExpandProgress by animateFloatAsState(
+                    // Do not delegate with `by` in composition: read inside layout & graphicsLayer for zero-recompose 120Hz
+                    val scientificExpandState = animateFloatAsState(
                         targetValue = if (state.isScientificExpanded) 1f else 0f,
                         animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
                         label = "scientific_expand_progress"
                     )
+                    val keypadContentScaleState = remember(scientificExpandState) {
+                        derivedStateOf { 1f - 0.11f * scientificExpandState.value }
+                    }
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         BoxWithConstraints(
@@ -242,41 +294,19 @@ fun CalculatorScreen(
 
                             val collapsedRowHeight = if (isCompactVertical) 56.dp else 62.dp
                             val expandedRowHeight = if (isCompactVertical) 44.dp else 48.dp
-                            val targetStandardRowHeight = lerp(
-                                collapsedRowHeight,
-                                expandedRowHeight,
-                                scientificExpandProgress
-                            )
                             val collapsedRowSpacing = if (isCompactVertical) 9.dp else 10.dp
                             val expandedRowSpacing = if (isCompactVertical) 6.dp else 8.dp
-                            val targetStandardRowSpacing = lerp(
-                                collapsedRowSpacing,
-                                expandedRowSpacing,
-                                scientificExpandProgress
-                            )
-                            val keypadTextScale = 1f - 0.12f * scientificExpandProgress
-                            val baseStandardCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 50.dp
-                                ButtonShapeStyle.SQUIRCLE -> 24.dp
-                                ButtonShapeStyle.SHARP -> 12.dp
+
+                            val standardRestingCorner = when (state.buttonShapeStyle) {
+                                ButtonShapeStyle.PILL -> if (state.isScientificExpanded) 20.dp else 50.dp
+                                ButtonShapeStyle.SQUIRCLE -> if (state.isScientificExpanded) 16.dp else 24.dp
+                                ButtonShapeStyle.SHARP -> if (state.isScientificExpanded) 10.dp else 12.dp
                             }
-                            val expandedStandardCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 20.dp
-                                ButtonShapeStyle.SQUIRCLE -> 16.dp
-                                ButtonShapeStyle.SHARP -> 10.dp
+                            val standardPressedCorner = when (state.buttonShapeStyle) {
+                                ButtonShapeStyle.PILL -> if (state.isScientificExpanded) 13.dp else 15.dp
+                                ButtonShapeStyle.SQUIRCLE -> if (state.isScientificExpanded) 10.dp else 12.dp
+                                ButtonShapeStyle.SHARP -> if (state.isScientificExpanded) 6.dp else 7.dp
                             }
-                            val standardRestingCorner = lerp(baseStandardCorner, expandedStandardCorner, scientificExpandProgress)
-                            val baseStandardPressedCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 15.dp
-                                ButtonShapeStyle.SQUIRCLE -> 12.dp
-                                ButtonShapeStyle.SHARP -> 7.dp
-                            }
-                            val expandedStandardPressedCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 13.dp
-                                ButtonShapeStyle.SQUIRCLE -> 10.dp
-                                ButtonShapeStyle.SHARP -> 6.dp
-                            }
-                            val standardPressedCorner = lerp(baseStandardPressedCorner, expandedStandardPressedCorner, scientificExpandProgress)
                             val sciRestingCorner = when (state.buttonShapeStyle) {
                                 ButtonShapeStyle.PILL -> 15.dp
                                 ButtonShapeStyle.SQUIRCLE -> 13.dp
@@ -309,7 +339,7 @@ fun CalculatorScreen(
                                         onInspectBigNumber = viewModel::openBigNumberViewer,
                                         compactMode = true,
                                         onThemeButtonPositioned = { themeButtonAnchorRoot = it },
-                                        modifier = Modifier.onSizeChanged { displayCardHeightPx = it.height }
+                                        modifier = Modifier.onSizeChanged { displayCardHeightPxState.intValue = it.height }
                                     )
 
                                     ScientificToggleStrip(
@@ -318,51 +348,51 @@ fun CalculatorScreen(
                                         onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) }
                                     )
 
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth()
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(
-                                    lerp(0.dp, 14.dp, scientificExpandProgress)
-                                )
-                            ) {
-                                val containerWidth = this@BoxWithConstraints.maxWidth.coerceAtMost(980.dp)
-                                val fullSciWidth = ((containerWidth - 54.dp) * 0.45f).coerceAtLeast(180.dp)
-                                if (scientificExpandProgress > 0.001f || state.isScientificExpanded) {
-                                    Box(
+                                    Row(
                                         modifier = Modifier
-                                            .fillMaxHeight()
-                                            .clipToBounds()
-                                            .layout { measurable, constraints ->
-                                                val targetFullPx = fullSciWidth.roundToPx()
-                                                    .coerceAtMost(constraints.maxWidth)
-                                                val placeable = measurable.measure(
-                                                    constraints.copy(minWidth = targetFullPx, maxWidth = targetFullPx)
-                                                )
-                                                val visibleW = (placeable.width * scientificExpandProgress)
-                                                    .roundToInt()
-                                                    .coerceIn(0, placeable.width)
-                                                layout(visibleW, placeable.height) {
-                                                    placeable.placeRelativeWithLayer(
-                                                        x = visibleW - placeable.width,
-                                                        y = 0
-                                                    ) {
-                                                        alpha = scientificExpandProgress
+                                            .weight(1f)
+                                            .fillMaxWidth()
+                                            .navigationBarsPadding()
+                                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                                    ) {
+                                        val containerWidth = this@BoxWithConstraints.maxWidth.coerceAtMost(980.dp)
+                                        val fullSciWidth = ((containerWidth - 54.dp) * 0.45f).coerceAtLeast(180.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .clipToBounds()
+                                                .layout { measurable, constraints ->
+                                                    val p = scientificExpandState.value
+                                                    val targetFullPx = fullSciWidth.roundToPx()
+                                                        .coerceAtMost(constraints.maxWidth)
+                                                    val gapPx = (14.dp.toPx() * p).roundToInt()
+                                                    val placeable = measurable.measure(
+                                                        constraints.copy(minWidth = targetFullPx, maxWidth = targetFullPx)
+                                                    )
+                                                    val visibleW = (placeable.width * p)
+                                                        .roundToInt()
+                                                        .coerceIn(0, placeable.width)
+                                                    layout(visibleW + if (visibleW > 0) gapPx else 0, placeable.height) {
+                                                        if (visibleW > 0) {
+                                                            placeable.placeRelativeWithLayer(
+                                                                x = visibleW - placeable.width,
+                                                                y = 0
+                                                            ) {
+                                                                alpha = p
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                            }
-                                    ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(24.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                            border = BorderStroke(
-                                                width = 1.dp,
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
-                                            ),
-                                            modifier = Modifier.fillMaxSize()
                                         ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(24.dp),
+                                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                border = BorderStroke(
+                                                    width = 1.dp,
+                                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)
+                                                ),
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
                                                 ScientificKeypadGrid(
                                                     isInverse = state.isInverseMode,
                                                     angleUnit = state.angleUnit,
@@ -375,75 +405,74 @@ fun CalculatorScreen(
                                                 )
                                             }
                                         }
-                                    }
 
-                                    StandardKeypadGrid(
-                                        viewModel = viewModel,
-                                        rowHeight = null,
-                                        rowSpacing = 10.dp,
-                                        textScale = 1f,
-                                        restingCornerRadius = standardRestingCorner,
-                                        pressedCornerRadius = standardPressedCorner,
+                                        StandardKeypadGrid(
+                                            viewModel = viewModel,
+                                            rowHeight = null,
+                                            rowSpacing = 10.dp,
+                                            restingCornerRadius = standardRestingCorner,
+                                            pressedCornerRadius = standardPressedCorner,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
+                                        )
+                                    }
+                                } else {
+                                    CalculatorDisplay(
+                                        state = state,
+                                        onToggleTheme = { triggerThemeReveal { viewModel.cycleThemeMode() } },
+                                        onToggleSound = viewModel::toggleSoundEnabled,
+                                        onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
+                                        onQuickToggleFeedback = { sound, vib ->
+                                            viewModel.setFeedbackEnabled(sound, vib, view)
+                                        },
+                                        onToggleTopHistory = viewModel::toggleTopHistory,
+                                        onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
+                                        onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
+                                        onOpenSettings = { viewModel.setSettingsSheetOpen(true) },
+                                        onInspectBigNumber = viewModel::openBigNumberViewer,
+                                        compactMode = isCompactVertical,
+                                        onThemeButtonPositioned = { themeButtonAnchorRoot = it },
                                         modifier = Modifier
                                             .weight(1f)
-                                            .fillMaxHeight()
+                                            .heightIn(min = 190.dp)
+                                            .onSizeChanged { displayCardHeightPxState.intValue = it.height }
                                     )
-                                }
-                            } else {
-                                CalculatorDisplay(
-                                    state = state,
-                                    onToggleTheme = { triggerThemeReveal { viewModel.cycleThemeMode() } },
-                                    onToggleSound = viewModel::toggleSoundEnabled,
-                                    onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
-                                    onQuickToggleFeedback = { sound, vib ->
-                                        viewModel.setFeedbackEnabled(sound, vib, view)
-                                    },
-                                    onToggleTopHistory = viewModel::toggleTopHistory,
-                                    onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
-                                    onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
-                                    onOpenSettings = { viewModel.setSettingsSheetOpen(true) },
-                                    onInspectBigNumber = viewModel::openBigNumberViewer,
-                                    compactMode = isCompactVertical,
-                                    onThemeButtonPositioned = { themeButtonAnchorRoot = it },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 190.dp)
-                                        .onSizeChanged { displayCardHeightPx = it.height }
-                                )
 
-                                ScientificToggleStrip(
-                                    isExpanded = state.isScientificExpanded,
-                                    onToggle = viewModel::toggleScientificExpanded,
-                                    onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) }
-                                )
+                                    ScientificToggleStrip(
+                                        isExpanded = state.isScientificExpanded,
+                                        onToggle = viewModel::toggleScientificExpanded,
+                                        onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) }
+                                    )
 
-                                val portraitPadVertical = lerp(8.dp, 6.dp, scientificExpandProgress)
-                                val sciBottomPadding = if (isCompactVertical) 7.dp else 9.dp
-                                val sciTrayHeight = if (isCompactVertical) 114.dp else 128.dp
+                                    val sciBottomPadding = if (isCompactVertical) 7.dp else 9.dp
+                                    val sciTrayHeight = if (isCompactVertical) 114.dp else 128.dp
 
-                                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .navigationBarsPadding()
-                                            .padding(horizontal = 18.dp, vertical = portraitPadVertical)
-                                    ) {
-                                        if (scientificExpandProgress > 0.001f || state.isScientificExpanded) {
+                                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .navigationBarsPadding()
+                                                .padding(horizontal = 18.dp, vertical = 7.dp)
+                                        ) {
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .clipToBounds()
                                                     .layout { measurable, constraints ->
+                                                        val p = scientificExpandState.value
                                                         val placeable = measurable.measure(constraints)
-                                                        val visibleH = (placeable.height * scientificExpandProgress)
+                                                        val visibleH = (placeable.height * p)
                                                             .roundToInt()
                                                             .coerceIn(0, placeable.height)
                                                         layout(placeable.width, visibleH) {
-                                                            placeable.placeRelativeWithLayer(
-                                                                x = 0,
-                                                                y = visibleH - placeable.height
-                                                            ) {
-                                                                alpha = scientificExpandProgress
+                                                            if (visibleH > 0) {
+                                                                placeable.placeRelativeWithLayer(
+                                                                    x = 0,
+                                                                    y = visibleH - placeable.height
+                                                                ) {
+                                                                    alpha = p
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -473,85 +502,68 @@ fun CalculatorScreen(
                                                     )
                                                 }
                                             }
-                                        }
 
-                                        StandardKeypadGrid(
-                                            viewModel = viewModel,
-                                            rowHeight = targetStandardRowHeight,
-                                            rowSpacing = targetStandardRowSpacing,
-                                            textScale = keypadTextScale,
-                                            restingCornerRadius = standardRestingCorner,
-                                            pressedCornerRadius = standardPressedCorner,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
+                                            StandardKeypadGrid(
+                                                viewModel = viewModel,
+                                                rowHeight = null,
+                                                rowSpacing = collapsedRowSpacing,
+                                                collapsedRowHeight = collapsedRowHeight,
+                                                expandedRowHeight = expandedRowHeight,
+                                                collapsedRowSpacing = collapsedRowSpacing,
+                                                expandedRowSpacing = expandedRowSpacing,
+                                                expandProgressState = scientificExpandState,
+                                                contentScaleState = keypadContentScaleState,
+                                                restingCornerRadius = standardRestingCorner,
+                                                pressedCornerRadius = standardPressedCorner,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        TopPullDownHistoryOverlay(
+                            visible = state.isTopHistoryOpen,
+                            history = state.history,
+                            maxHeight = quickHistoryMaxHeight,
+                            onDismiss = { viewModel.setTopHistoryOpen(false) },
+                            onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
+                            onUseExpression = viewModel::useHistoryExpression,
+                            onUseResult = viewModel::useHistoryResult,
+                            onCopyResult = copyToClipboard
+                        )
+
+                        VoiceMathInputOverlay(
+                            visible = state.isVoiceInputDialogOpen,
+                            angleUnit = state.angleUnit,
+                            onInsertExpression = { expr ->
+                                viewModel.applyVoiceExpression(expr, evaluateImmediately = false)
+                            },
+                            onEvaluateExpression = { expr ->
+                                viewModel.applyVoiceExpression(expr, evaluateImmediately = true)
+                            },
+                            onDismiss = { viewModel.setVoiceInputDialogOpen(false) }
+                        )
                     }
-
-                TopPullDownHistoryOverlay(
-                    visible = state.isTopHistoryOpen,
-                    history = state.history,
-                    maxHeight = quickHistoryMaxHeight,
-                    onDismiss = { viewModel.setTopHistoryOpen(false) },
-                    onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
-                    onUseExpression = viewModel::useHistoryExpression,
-                    onUseResult = viewModel::useHistoryResult,
-                    onCopyResult = copyToClipboard
-                )
-
-                VoiceMathInputOverlay(
-                    visible = state.isVoiceInputDialogOpen,
-                    angleUnit = state.angleUnit,
-                    onInsertExpression = { expr ->
-                        viewModel.applyVoiceExpression(expr, evaluateImmediately = false)
-                    },
-                    onEvaluateExpression = { expr ->
-                        viewModel.applyVoiceExpression(expr, evaluateImmediately = true)
-                    },
-                        onDismiss = { viewModel.setVoiceInputDialogOpen(false) }
-                    )
                 }
             }
-        }
 
             if (isThemeRevealing) {
                 val revealRimColor = MaterialTheme.colorScheme.primary
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val progress = revealRadiusFraction.value
-                    val origin = revealOriginRoot?.let { it - rootBoxOrigin }
-                        ?: Offset(size.width * 0.16f, size.height * 0.08f)
-                    val maxRadius = hypot(
-                        maxOf(origin.x, size.width - origin.x),
-                        maxOf(origin.y, size.height - origin.y)
-                    ) * 1.04f
-                    val radius = (maxRadius * progress).coerceAtLeast(1f)
-
-                    revealClipPath.reset()
-                    revealClipPath.addOval(
-                        Rect(
-                            left = origin.x - radius,
-                            top = origin.y - radius,
-                            right = origin.x + radius,
-                            bottom = origin.y + radius
-                        )
-                    )
-
-                    clipPath(revealClipPath, clipOp = ClipOp.Difference) {
-                        drawLayer(oldThemeLayer)
-                    }
-
                     val rimFade = (1f - progress).coerceIn(0f, 1f)
                     if (rimFade > 0.01f) {
+                        val origin = revealOriginRoot?.let { it - rootBoxOrigin }
+                            ?: Offset(size.width * 0.16f, size.height * 0.08f)
+                        val maxRadius = hypot(
+                            maxOf(origin.x, size.width - origin.x),
+                            maxOf(origin.y, size.height - origin.y)
+                        ) * 1.02f
+                        val radius = (maxRadius * progress).coerceAtLeast(1f)
                         drawCircle(
-                            color = revealRimColor.copy(alpha = 0.20f * rimFade),
-                            radius = radius,
-                            center = origin,
-                            style = Stroke(width = 7.dp.toPx())
-                        )
-                        drawCircle(
-                            color = revealRimColor.copy(alpha = 0.42f * rimFade),
+                            color = revealRimColor.copy(alpha = 0.34f * rimFade),
                             radius = radius,
                             center = origin,
                             style = Stroke(width = 1.75.dp.toPx())
@@ -1095,31 +1107,36 @@ private fun StandardKeypadGrid(
     viewModel: CalculatorViewModel,
     rowHeight: Dp?,
     rowSpacing: Dp = 11.dp,
-    textScale: Float = 1f,
+    collapsedRowHeight: Dp = 62.dp,
+    expandedRowHeight: Dp = 48.dp,
+    collapsedRowSpacing: Dp = 10.dp,
+    expandedRowSpacing: Dp = 8.dp,
+    expandProgressState: State<Float>? = null,
+    contentScaleState: State<Float>? = null,
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 14.dp,
     modifier: Modifier = Modifier
 ) {
     val spacing = rowSpacing
     val operatorGlyphStyle = MaterialTheme.typography.headlineMedium.copy(
-        fontSize = (32f * textScale).sp,
-        lineHeight = (32f * textScale).sp,
+        fontSize = 32.sp,
+        lineHeight = 32.sp,
         fontWeight = FontWeight.Medium,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
-    Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        val r1Mod = if (rowHeight != null) Modifier.fillMaxWidth().height(rowHeight) else Modifier.weight(1f).fillMaxWidth()
-        val r2Mod = if (rowHeight != null) Modifier.fillMaxWidth().height(rowHeight) else Modifier.weight(1f).fillMaxWidth()
-        val r3Mod = if (rowHeight != null) Modifier.fillMaxWidth().height(rowHeight) else Modifier.weight(1f).fillMaxWidth()
-        val r4Mod = if (rowHeight != null) Modifier.fillMaxWidth().height(rowHeight) else Modifier.weight(1f).fillMaxWidth()
-        val r5Mod = if (rowHeight != null) Modifier.fillMaxWidth().height(rowHeight) else Modifier.weight(1f).fillMaxWidth()
+
+    val rowsContent: @Composable () -> Unit = {
+        val rowModifier = if (expandProgressState != null) {
+            Modifier.fillMaxWidth()
+        } else if (rowHeight != null) {
+            Modifier.fillMaxWidth().height(rowHeight)
+        } else {
+            Modifier.fillMaxWidth()
+        }
 
         // Row 1: AC, (), %, ÷
         Row(
-            modifier = r1Mod,
+            modifier = rowModifier,
             horizontalArrangement = Arrangement.spacedBy(spacing)
         ) {
             ExpressiveCalcButton(
@@ -1129,7 +1146,7 @@ private fun StandardKeypadGrid(
                 hasGlow = true,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
-                textScale = textScale,
+                contentScaleState = contentScaleState,
                 onClick = viewModel::onAllClear,
                 modifier = Modifier
                     .weight(1f)
@@ -1141,7 +1158,7 @@ private fun StandardKeypadGrid(
                 testTag = "btn_paren",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
-                textScale = textScale,
+                contentScaleState = contentScaleState,
                 onClick = viewModel::onSmartParenthesis,
                 modifier = Modifier
                     .weight(1f)
@@ -1149,11 +1166,11 @@ private fun StandardKeypadGrid(
             ) {
                 val parenStyle = MaterialTheme.typography.headlineMedium.copy(
                     fontFamily = PlusJakartaSansFontFamily,
-                    fontSize = (24f * textScale).sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Normal
                 )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy((8f * textScale).dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = "(", style = parenStyle)
@@ -1166,7 +1183,7 @@ private fun StandardKeypadGrid(
                 testTag = "btn_percent",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
-                textScale = textScale,
+                contentScaleState = contentScaleState,
                 onClick = viewModel::onPercent,
                 modifier = Modifier
                     .weight(1f)
@@ -1178,6 +1195,7 @@ private fun StandardKeypadGrid(
                 testTag = "btn_div",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("÷") },
                 modifier = Modifier
@@ -1188,18 +1206,19 @@ private fun StandardKeypadGrid(
 
         // Row 2: 7, 8, 9, ×
         Row(
-            modifier = r2Mod,
+            modifier = rowModifier,
             horizontalArrangement = Arrangement.spacedBy(spacing)
         ) {
-            DigitButton("7", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("8", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("9", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
             ExpressiveCalcButton(
                 label = "×",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_mul",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("×") },
                 modifier = Modifier
@@ -1210,18 +1229,19 @@ private fun StandardKeypadGrid(
 
         // Row 3: 4, 5, 6, −
         Row(
-            modifier = r3Mod,
+            modifier = rowModifier,
             horizontalArrangement = Arrangement.spacedBy(spacing)
         ) {
-            DigitButton("4", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("5", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("6", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
             ExpressiveCalcButton(
                 label = "−",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_sub",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("−") },
                 modifier = Modifier
@@ -1232,18 +1252,19 @@ private fun StandardKeypadGrid(
 
         // Row 4: 1, 2, 3, +
         Row(
-            modifier = r4Mod,
+            modifier = rowModifier,
             horizontalArrangement = Arrangement.spacedBy(spacing)
         ) {
-            DigitButton("1", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("2", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
-            DigitButton("3", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
             ExpressiveCalcButton(
                 label = "+",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_add",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("+") },
                 modifier = Modifier
@@ -1254,17 +1275,17 @@ private fun StandardKeypadGrid(
 
         // Row 5: 0, ., ⌫, =
         Row(
-            modifier = r5Mod,
+            modifier = rowModifier,
             horizontalArrangement = Arrangement.spacedBy(spacing)
         ) {
-            DigitButton("0", viewModel, textScale, restingCornerRadius, pressedCornerRadius, Modifier.weight(1f).fillMaxHeight())
+            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, Modifier.weight(1f).fillMaxHeight())
             ExpressiveCalcButton(
                 label = ".",
                 role = CalcButtonRole.DIGIT,
                 testTag = "btn_dot",
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
-                textScale = textScale,
+                contentScaleState = contentScaleState,
                 onClick = viewModel::onDecimalPoint,
                 modifier = Modifier
                     .weight(1f)
@@ -1277,6 +1298,7 @@ private fun StandardKeypadGrid(
                 hasGlow = true,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 contentDescriptionText = stringResource(R.string.cd_backspace),
                 onClick = viewModel::onBackspace,
                 onLongClick = viewModel::onAllClear,
@@ -1287,7 +1309,7 @@ private fun StandardKeypadGrid(
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Backspace,
                     contentDescription = stringResource(R.string.cd_backspace),
-                    modifier = Modifier.size((21f * textScale).dp)
+                    modifier = Modifier.size(21.dp)
                 )
             }
             ExpressiveCalcButton(
@@ -1297,6 +1319,7 @@ private fun StandardKeypadGrid(
                 hasGlow = true,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = viewModel::onEquals,
                 modifier = Modifier
@@ -1305,15 +1328,73 @@ private fun StandardKeypadGrid(
             )
         }
     }
+
+    if (expandProgressState != null) {
+        // Custom Layout reads expandProgressState during measure/layout pass: zero recomposition across all 20 buttons!
+        Layout(
+            content = rowsContent,
+            modifier = modifier
+        ) { measurables, constraints ->
+            val p = expandProgressState.value
+            val collapsedHPx = collapsedRowHeight.toPx()
+            val expandedHPx = expandedRowHeight.toPx()
+            val rowHPx = (collapsedHPx + (expandedHPx - collapsedHPx) * p).roundToInt().coerceAtLeast(1)
+
+            val collapsedGapPx = collapsedRowSpacing.toPx()
+            val expandedGapPx = expandedRowSpacing.toPx()
+            val gapPx = (collapsedGapPx + (expandedGapPx - collapsedGapPx) * p).roundToInt().coerceAtLeast(0)
+
+            val rowConstraints = Constraints.fixed(constraints.maxWidth, rowHPx)
+            val placeables = measurables.map { it.measure(rowConstraints) }
+            val totalHeight = if (placeables.isEmpty()) 0 else placeables.size * rowHPx + (placeables.size - 1) * gapPx
+
+            layout(constraints.maxWidth, totalHeight) {
+                var y = 0
+                for (placeable in placeables) {
+                    placeable.placeRelative(0, y)
+                    y += rowHPx + gapPx
+                }
+            }
+        }
+    } else if (rowHeight == null) {
+        // Landscape fillHeight mode: divide available height evenly across the 5 rows
+        Layout(
+            content = rowsContent,
+            modifier = modifier
+        ) { measurables, constraints ->
+            val count = measurables.size.coerceAtLeast(1)
+            val gapPx = spacing.roundToPx()
+            val totalGaps = (count - 1) * gapPx
+            val rowHPx = ((constraints.maxHeight - totalGaps) / count).coerceAtLeast(1)
+            val rowConstraints = Constraints.fixed(constraints.maxWidth, rowHPx)
+            val placeables = measurables.map { it.measure(rowConstraints) }
+            val totalHeight = placeables.size * rowHPx + totalGaps
+
+            layout(constraints.maxWidth, totalHeight) {
+                var y = 0
+                for (placeable in placeables) {
+                    placeable.placeRelative(0, y)
+                    y += rowHPx + gapPx
+                }
+            }
+        }
+    } else {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            rowsContent()
+        }
+    }
 }
 
 @Composable
 private fun DigitButton(
     digit: String,
     viewModel: CalculatorViewModel,
-    textScale: Float = 1f,
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 14.dp,
+    contentScaleState: State<Float>? = null,
     modifier: Modifier = Modifier
 ) {
     ExpressiveCalcButton(
@@ -1322,7 +1403,7 @@ private fun DigitButton(
         testTag = "btn_$digit",
         restingCornerRadius = restingCornerRadius,
         pressedCornerRadius = pressedCornerRadius,
-        textScale = textScale,
+        contentScaleState = contentScaleState,
         onClick = { viewModel.onDigit(digit) },
         modifier = modifier
     )

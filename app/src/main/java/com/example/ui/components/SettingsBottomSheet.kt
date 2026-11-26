@@ -1,5 +1,9 @@
 package com.example.ui.components
 
+import android.content.Context
+import android.hardware.display.DisplayManager
+import android.os.Build
+import android.view.Display
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -64,6 +68,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,13 +84,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogWindowProvider
 import com.example.R
 import com.example.audio.HapticIntensity
 import com.example.data.preferences.ButtonShapeStyle
@@ -130,19 +137,57 @@ fun SettingsBottomSheet(
     val resetCardPulse = remember { Animatable(1f) }
     var justReset by remember { mutableStateOf(false) }
 
-    val headerDividerAlpha by animateFloatAsState(
-        targetValue = if (scrollState.value > 6) 1f else 0f,
-        animationSpec = tween(durationMillis = 160),
+    val isScrolled by remember {
+        derivedStateOf { scrollState.value > 6 }
+    }
+    val headerDividerAlphaState = animateFloatAsState(
+        targetValue = if (isScrolled) 1f else 0f,
+        animationSpec = tween(durationMillis = 150),
         label = "settings_header_divider_alpha"
     )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        dragHandle = null,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         modifier = Modifier.testTag("settings_modal_sheet")
     ) {
+        val sheetView = LocalView.current
+        SideEffect {
+            val dialogWindow = (sheetView.parent as? DialogWindowProvider)?.window
+            if (dialogWindow != null) {
+                runCatching {
+                    val dm = sheetView.context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+                    val activeDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        runCatching { sheetView.display }.getOrNull()
+                    } else {
+                        null
+                    } ?: dm?.getDisplay(Display.DEFAULT_DISPLAY)
+                    val currentMode = activeDisplay?.mode
+                    val supportedModes = activeDisplay?.supportedModes
+                    if (currentMode != null && !supportedModes.isNullOrEmpty()) {
+                        val bestMode = supportedModes
+                            .filter {
+                                it.physicalWidth == currentMode.physicalWidth &&
+                                    it.physicalHeight == currentMode.physicalHeight
+                            }
+                            .maxByOrNull { it.refreshRate }
+                            ?: currentMode
+                        val params = dialogWindow.attributes
+                        if (params.preferredDisplayModeId != bestMode.modeId ||
+                            params.preferredRefreshRate != bestMode.refreshRate
+                        ) {
+                            params.preferredDisplayModeId = bestMode.modeId
+                            params.preferredRefreshRate = bestMode.refreshRate
+                            dialogWindow.attributes = params
+                        }
+                    }
+                }
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -157,7 +202,7 @@ fun SettingsBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp),
+                        .padding(top = 18.dp, bottom = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -204,7 +249,10 @@ fun SettingsBottomSheet(
                     }
                 }
                 HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f * headerDividerAlpha)
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.26f),
+                    modifier = Modifier.graphicsLayer {
+                        alpha = headerDividerAlphaState.value
+                    }
                 )
             }
 
@@ -724,25 +772,26 @@ private fun CustomAccentColorEditor(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            val hueBrush = remember {
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.Red,
+                        Color.Yellow,
+                        Color.Green,
+                        Color.Cyan,
+                        Color.Blue,
+                        Color.Magenta,
+                        Color.Red
+                    )
+                )
+            }
             Box(contentAlignment = Alignment.Center) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(10.dp)
                         .clip(CircleShape)
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color.Red,
-                                    Color.Yellow,
-                                    Color.Green,
-                                    Color.Cyan,
-                                    Color.Blue,
-                                    Color.Magenta,
-                                    Color.Red
-                                )
-                            )
-                        )
+                        .background(hueBrush)
                 )
                 Slider(
                     value = hue,
