@@ -17,7 +17,7 @@ android {
     minSdk = 24
     targetSdk = 36
     val appVersionCode =
-      providers.gradleProperty("versionCode").orNull?.trim()?.toIntOrNull()?.takeIf { it > 0 } ?: 1
+      providers.gradleProperty("versionCode").orNull?.trim()?.toIntOrNull()?.takeIf { it > 0 } ?: 42
     versionCode = appVersionCode
     versionName = "1.0.$appVersionCode"
 
