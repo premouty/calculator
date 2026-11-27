@@ -55,13 +55,6 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "dist/ExpressiveCalc-${{ steps.version.outputs.name }}.apk"
 
-      - name: Upload debug keystore artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-keystore
-          path: debug.keystore
-          if-no-files-found: ignore
-
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
