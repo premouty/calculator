@@ -54,6 +54,61 @@ class SpokenMathParserTest {
     }
 
     @Test
+    fun `parses all Ukrainian and Russian parenthesis phrases regardless of case and spacing`() {
+        val uaVariants = listOf(
+            "ДУЖКА ВІДКРИВАЄТЬСЯ 2 плюс 3 ДУЖКА ЗАКРИВАЄТЬСЯ",
+            "Відкрити дужку 2 плюс 3 Закрити дужку",
+            "Відкрита  дужка 2 плюс 3 Закрита  дужка",
+            "Ліва дужка 2 плюс 3 Права дужка"
+        )
+        for (input in uaVariants) {
+            val parsed = SpokenMathParser.parse(input, AngleUnit.DEG)
+            assertNotNull("Expected non-null parse for: $input", parsed)
+            assertEquals("(2+3)", parsed!!.rawExpression)
+            assertEquals("5", parsed.previewResult)
+        }
+
+        val ruVariants = listOf(
+            "Скобка открывается 4 плюс 6 Скобка закрывается",
+            "ОТКРЫТЬ СКОБКУ 4 плюс 6 ЗАКРЫТЬ СКОБКУ"
+        )
+        for (input in ruVariants) {
+            val parsed = SpokenMathParser.parse(input, AngleUnit.DEG)
+            assertNotNull("Expected non-null parse for: $input", parsed)
+            assertEquals("(4+6)", parsed!!.rawExpression)
+            assertEquals("10", parsed.previewResult)
+        }
+    }
+
+    @Test
+    fun `handles whitespace and implicit multiplication before opening parenthesis`() {
+        val spokenMult = SpokenMathParser.parse(
+            "два відкрити дужку три плюс чотири закрити дужку",
+            AngleUnit.DEG
+        )
+        assertNotNull(spokenMult)
+        assertEquals("2×(3+4)", spokenMult!!.rawExpression)
+        assertEquals("14", spokenMult.previewResult)
+
+        val symbolicMult = SpokenMathParser.parse("2  ( 3 + 4 )", AngleUnit.DEG)
+        assertNotNull(symbolicMult)
+        assertEquals("2×(3+4)", symbolicMult!!.rawExpression)
+        assertEquals("14", symbolicMult.previewResult)
+
+        val partialParen = SpokenMathParser.parse("2(", AngleUnit.DEG)
+        assertNotNull(partialParen)
+        assertEquals("2×()", partialParen!!.rawExpression)
+
+        val adjacentParens = SpokenMathParser.parse(
+            "ліва дужка 2 плюс 3 права дужка дужка відкривається 4 плюс 5 дужка закривається",
+            AngleUnit.DEG
+        )
+        assertNotNull(adjacentParens)
+        assertEquals("(2+3)×(4+5)", adjacentParens!!.rawExpression)
+        assertEquals("45", adjacentParens.previewResult)
+    }
+
+    @Test
     fun `returns null when speech has no math content`() {
         val parsed = SpokenMathParser.parse("привіт як справи сьогодні", AngleUnit.DEG)
         assertNull(parsed)

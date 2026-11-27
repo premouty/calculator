@@ -99,8 +99,22 @@ object SpokenMathParser {
         // Multi-word math phrases -> symbolic placeholders before word-by-word number assembly
         s = s
             .replace(wordBound("квадратний корінь із|квадратний корінь з|корінь квадратний із|корінь квадратний з|корінь із|корінь з|квадратный корень из|корень из|square root of|sqrt"), " √( ")
-            .replace(wordBound("відкрити дужку|відкрий дужку|дужка відкривається|open parenthesis|open bracket"), " ( ")
-            .replace(wordBound("закрити дужку|закрий дужку|дужка закривається|close parenthesis|close bracket"), " ) ")
+            .replace(
+                wordBound(
+                    "дужка\\s+відкривається|відкрити\\s+дужку|відкрий\\s+дужку|відкрита\\s+дужка|ліва\\s+дужка|" +
+                        "скобка\\s+открывается|открыть\\s+скобку|открытая\\s+скобка|левая\\s+скобка|" +
+                        "open\\s+parenthesis|open\\s+bracket"
+                ),
+                " ( "
+            )
+            .replace(
+                wordBound(
+                    "дужка\\s+закривається|закрити\\s+дужку|закрий\\s+дужку|закрита\\s+дужка|права\\s+дужка|" +
+                        "скобка\\s+закрывается|закрыть\\s+скобку|закрытая\\s+скобка|правая\\s+скобка|" +
+                        "close\\s+parenthesis|close\\s+bracket"
+                ),
+                " ) "
+            )
             .replace(wordBound("натуральний логарифм|натуральный логарифм"), " ln( ")
             .replace(wordBound("десятковий логарифм|десятичный логарифм|логарифм"), " log( ")
             .replace(wordBound("арксинус|arcsin"), " sin⁻¹( ")
@@ -181,8 +195,12 @@ object SpokenMathParser {
             }
         }
         if (cleaned.isEmpty()) return null
-        val hasOperand = cleaned.any { it.isDigit() || it == 'π' || it == 'e' }
-        return if (hasOperand) cleaned else null
+        val withImplicitMult = cleaned.replace(
+            Regex("(?<=[0-9)πe%!])(?=\\(|√\\(|sin⁻¹\\(|cos⁻¹\\(|tan⁻¹\\(|sin\\(|cos\\(|tan\\(|ln\\(|log\\()"),
+            "×"
+        )
+        val hasOperand = withImplicitMult.any { it.isDigit() || it == 'π' || it == 'e' }
+        return if (hasOperand) withImplicitMult else null
     }
 
     private fun tokenizeWordsAndSymbols(input: String): List<String> {
