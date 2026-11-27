@@ -7,10 +7,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.audio.DEFAULT_HAPTIC_DURATION_MS
+import com.example.audio.DEFAULT_HAPTIC_STRENGTH
 import com.example.audio.HapticIntensity
+import com.example.audio.HapticStyle
 import com.example.ui.theme.DEFAULT_CUSTOM_ACCENT_ARGB
 import com.example.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +44,10 @@ data class UserCalcPreferences(
     val isFeedbackPermissionGranted: Boolean = false,
     val soundVolume: Float = DEFAULT_SOUND_VOLUME,
     val hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
+    val hapticStyle: HapticStyle = HapticStyle.ADAPTIVE,
+    val hapticStrength: Float = DEFAULT_HAPTIC_STRENGTH,
+    val hapticDurationMs: Int = DEFAULT_HAPTIC_DURATION_MS,
+    val hapticAccentEquals: Boolean = true,
     val buttonShapeStyle: ButtonShapeStyle = ButtonShapeStyle.PILL,
     val useDynamicColor: Boolean = true,
     val customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
@@ -58,6 +66,10 @@ class UserPreferencesRepository(private val context: Context) {
         val FEEDBACK_PERMISSION_GRANTED = booleanPreferencesKey("feedback_permission_granted")
         val SOUND_VOLUME = floatPreferencesKey("sound_volume")
         val HAPTIC_INTENSITY = stringPreferencesKey("haptic_intensity")
+        val HAPTIC_STYLE = stringPreferencesKey("haptic_style")
+        val HAPTIC_STRENGTH = floatPreferencesKey("haptic_strength")
+        val HAPTIC_DURATION_MS = intPreferencesKey("haptic_duration_ms")
+        val HAPTIC_ACCENT_EQUALS = booleanPreferencesKey("haptic_accent_equals")
         val BUTTON_SHAPE_STYLE = stringPreferencesKey("button_shape_style")
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
         val CUSTOM_ACCENT_ARGB = longPreferencesKey("custom_accent_argb")
@@ -75,6 +87,10 @@ class UserPreferencesRepository(private val context: Context) {
         const val FEEDBACK_PERMISSION_GRANTED = "feedback_permission_granted"
         const val SOUND_VOLUME = "sound_volume"
         const val HAPTIC_INTENSITY = "haptic_intensity"
+        const val HAPTIC_STYLE = "haptic_style"
+        const val HAPTIC_STRENGTH = "haptic_strength"
+        const val HAPTIC_DURATION_MS = "haptic_duration_ms"
+        const val HAPTIC_ACCENT_EQUALS = "haptic_accent_equals"
         const val BUTTON_SHAPE_STYLE = "button_shape_style"
         const val USE_DYNAMIC_COLOR = "use_dynamic_color"
         const val CUSTOM_ACCENT_ARGB = "custom_accent_argb"
@@ -98,6 +114,18 @@ class UserPreferencesRepository(private val context: Context) {
             runCatching { HapticIntensity.valueOf(it) }.getOrNull()
         } ?: HapticIntensity.MEDIUM
 
+        val hapticStyle = syncPrefs.getString(SyncKeys.HAPTIC_STYLE, null)?.let {
+            runCatching { HapticStyle.valueOf(it) }.getOrNull()
+        } ?: HapticStyle.ADAPTIVE
+
+        val hapticStrength = syncPrefs.getFloat(SyncKeys.HAPTIC_STRENGTH, DEFAULT_HAPTIC_STRENGTH)
+            .coerceIn(0.15f, 1.0f)
+
+        val hapticDurationMs = syncPrefs.getInt(SyncKeys.HAPTIC_DURATION_MS, DEFAULT_HAPTIC_DURATION_MS)
+            .coerceIn(4, 40)
+
+        val hapticAccentEquals = syncPrefs.getBoolean(SyncKeys.HAPTIC_ACCENT_EQUALS, true)
+
         val buttonShapeStyle = syncPrefs.getString(SyncKeys.BUTTON_SHAPE_STYLE, null)?.let {
             runCatching { ButtonShapeStyle.valueOf(it) }.getOrNull()
         } ?: ButtonShapeStyle.PILL
@@ -114,6 +142,10 @@ class UserPreferencesRepository(private val context: Context) {
             isFeedbackPermissionGranted = syncPrefs.getBoolean(SyncKeys.FEEDBACK_PERMISSION_GRANTED, false),
             soundVolume = soundVolume,
             hapticIntensity = hapticIntensity,
+            hapticStyle = hapticStyle,
+            hapticStrength = hapticStrength,
+            hapticDurationMs = hapticDurationMs,
+            hapticAccentEquals = hapticAccentEquals,
             buttonShapeStyle = buttonShapeStyle,
             useDynamicColor = syncPrefs.getBoolean(SyncKeys.USE_DYNAMIC_COLOR, true),
             customAccentArgb = syncPrefs.getLong(SyncKeys.CUSTOM_ACCENT_ARGB, DEFAULT_CUSTOM_ACCENT_ARGB),
@@ -140,6 +172,14 @@ class UserPreferencesRepository(private val context: Context) {
         val hapticIntensity = prefs[Keys.HAPTIC_INTENSITY]?.let {
             runCatching { HapticIntensity.valueOf(it) }.getOrNull()
         } ?: HapticIntensity.MEDIUM
+
+        val hapticStyle = prefs[Keys.HAPTIC_STYLE]?.let {
+            runCatching { HapticStyle.valueOf(it) }.getOrNull()
+        } ?: HapticStyle.ADAPTIVE
+
+        val hapticStrength = (prefs[Keys.HAPTIC_STRENGTH] ?: DEFAULT_HAPTIC_STRENGTH).coerceIn(0.15f, 1.0f)
+        val hapticDurationMs = (prefs[Keys.HAPTIC_DURATION_MS] ?: DEFAULT_HAPTIC_DURATION_MS).coerceIn(4, 40)
+        val hapticAccentEquals = prefs[Keys.HAPTIC_ACCENT_EQUALS] ?: true
 
         val buttonShapeStyle = prefs[Keys.BUTTON_SHAPE_STYLE]?.let {
             runCatching { ButtonShapeStyle.valueOf(it) }.getOrNull()
@@ -175,6 +215,18 @@ class UserPreferencesRepository(private val context: Context) {
         if (!syncPrefs.contains(SyncKeys.HAPTIC_INTENSITY) && prefs.contains(Keys.HAPTIC_INTENSITY)) {
             syncPrefs.edit().putString(SyncKeys.HAPTIC_INTENSITY, hapticIntensity.name).apply()
         }
+        if (!syncPrefs.contains(SyncKeys.HAPTIC_STYLE) && prefs.contains(Keys.HAPTIC_STYLE)) {
+            syncPrefs.edit().putString(SyncKeys.HAPTIC_STYLE, hapticStyle.name).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.HAPTIC_STRENGTH) && prefs.contains(Keys.HAPTIC_STRENGTH)) {
+            syncPrefs.edit().putFloat(SyncKeys.HAPTIC_STRENGTH, hapticStrength).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.HAPTIC_DURATION_MS) && prefs.contains(Keys.HAPTIC_DURATION_MS)) {
+            syncPrefs.edit().putInt(SyncKeys.HAPTIC_DURATION_MS, hapticDurationMs).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.HAPTIC_ACCENT_EQUALS) && prefs.contains(Keys.HAPTIC_ACCENT_EQUALS)) {
+            syncPrefs.edit().putBoolean(SyncKeys.HAPTIC_ACCENT_EQUALS, hapticAccentEquals).apply()
+        }
         if (!syncPrefs.contains(SyncKeys.BUTTON_SHAPE_STYLE) && prefs.contains(Keys.BUTTON_SHAPE_STYLE)) {
             syncPrefs.edit().putString(SyncKeys.BUTTON_SHAPE_STYLE, buttonShapeStyle.name).apply()
         }
@@ -200,6 +252,10 @@ class UserPreferencesRepository(private val context: Context) {
             isFeedbackPermissionGranted = permissionGranted,
             soundVolume = soundVolume,
             hapticIntensity = hapticIntensity,
+            hapticStyle = hapticStyle,
+            hapticStrength = hapticStrength,
+            hapticDurationMs = hapticDurationMs,
+            hapticAccentEquals = hapticAccentEquals,
             buttonShapeStyle = buttonShapeStyle,
             useDynamicColor = useDynamicColor,
             customAccentArgb = customAccentArgb,
@@ -268,6 +324,43 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.HAPTIC_INTENSITY] = intensity.name }
     }
 
+    suspend fun setHapticPreset(intensity: HapticIntensity, strength: Float, durationMs: Int) {
+        val clampedStrength = strength.coerceIn(0.15f, 1.0f)
+        val clampedDuration = durationMs.coerceIn(4, 40)
+        syncPrefs.edit()
+            .putString(SyncKeys.HAPTIC_INTENSITY, intensity.name)
+            .putFloat(SyncKeys.HAPTIC_STRENGTH, clampedStrength)
+            .putInt(SyncKeys.HAPTIC_DURATION_MS, clampedDuration)
+            .apply()
+        context.dataStore.edit {
+            it[Keys.HAPTIC_INTENSITY] = intensity.name
+            it[Keys.HAPTIC_STRENGTH] = clampedStrength
+            it[Keys.HAPTIC_DURATION_MS] = clampedDuration
+        }
+    }
+
+    suspend fun setHapticStyle(style: HapticStyle) {
+        syncPrefs.edit().putString(SyncKeys.HAPTIC_STYLE, style.name).apply()
+        context.dataStore.edit { it[Keys.HAPTIC_STYLE] = style.name }
+    }
+
+    suspend fun setHapticStrength(strength: Float) {
+        val clamped = strength.coerceIn(0.15f, 1.0f)
+        syncPrefs.edit().putFloat(SyncKeys.HAPTIC_STRENGTH, clamped).apply()
+        context.dataStore.edit { it[Keys.HAPTIC_STRENGTH] = clamped }
+    }
+
+    suspend fun setHapticDurationMs(durationMs: Int) {
+        val clamped = durationMs.coerceIn(4, 40)
+        syncPrefs.edit().putInt(SyncKeys.HAPTIC_DURATION_MS, clamped).apply()
+        context.dataStore.edit { it[Keys.HAPTIC_DURATION_MS] = clamped }
+    }
+
+    suspend fun setHapticAccentEquals(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(SyncKeys.HAPTIC_ACCENT_EQUALS, enabled).apply()
+        context.dataStore.edit { it[Keys.HAPTIC_ACCENT_EQUALS] = enabled }
+    }
+
     suspend fun setButtonShapeStyle(style: ButtonShapeStyle) {
         syncPrefs.edit().putString(SyncKeys.BUTTON_SHAPE_STYLE, style.name).apply()
         context.dataStore.edit { it[Keys.BUTTON_SHAPE_STYLE] = style.name }
@@ -297,6 +390,10 @@ class UserPreferencesRepository(private val context: Context) {
         syncPrefs.edit()
             .putFloat(SyncKeys.SOUND_VOLUME, DEFAULT_SOUND_VOLUME)
             .putString(SyncKeys.HAPTIC_INTENSITY, HapticIntensity.MEDIUM.name)
+            .putString(SyncKeys.HAPTIC_STYLE, HapticStyle.ADAPTIVE.name)
+            .putFloat(SyncKeys.HAPTIC_STRENGTH, DEFAULT_HAPTIC_STRENGTH)
+            .putInt(SyncKeys.HAPTIC_DURATION_MS, DEFAULT_HAPTIC_DURATION_MS)
+            .putBoolean(SyncKeys.HAPTIC_ACCENT_EQUALS, true)
             .putString(SyncKeys.BUTTON_SHAPE_STYLE, ButtonShapeStyle.PILL.name)
             .putBoolean(SyncKeys.USE_DYNAMIC_COLOR, true)
             .putLong(SyncKeys.CUSTOM_ACCENT_ARGB, DEFAULT_CUSTOM_ACCENT_ARGB)
@@ -306,6 +403,10 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit {
             it[Keys.SOUND_VOLUME] = DEFAULT_SOUND_VOLUME
             it[Keys.HAPTIC_INTENSITY] = HapticIntensity.MEDIUM.name
+            it[Keys.HAPTIC_STYLE] = HapticStyle.ADAPTIVE.name
+            it[Keys.HAPTIC_STRENGTH] = DEFAULT_HAPTIC_STRENGTH
+            it[Keys.HAPTIC_DURATION_MS] = DEFAULT_HAPTIC_DURATION_MS
+            it[Keys.HAPTIC_ACCENT_EQUALS] = true
             it[Keys.BUTTON_SHAPE_STYLE] = ButtonShapeStyle.PILL.name
             it[Keys.USE_DYNAMIC_COLOR] = true
             it[Keys.CUSTOM_ACCENT_ARGB] = DEFAULT_CUSTOM_ACCENT_ARGB

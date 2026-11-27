@@ -7,7 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.CalcSoundEngine
 import com.example.audio.CalcSoundType
 import com.example.audio.CalcVibrator
+import com.example.audio.DEFAULT_HAPTIC_DURATION_MS
+import com.example.audio.DEFAULT_HAPTIC_STRENGTH
 import com.example.audio.HapticIntensity
+import com.example.audio.HapticStyle
 import com.example.data.local.CalculationRecord
 import com.example.data.local.CalculatorDatabase
 import com.example.data.preferences.AngleUnit
@@ -58,6 +61,10 @@ data class CalculatorUiState(
     val isFeedbackPermissionGranted: Boolean = false,
     val soundVolume: Float = DEFAULT_SOUND_VOLUME,
     val hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
+    val hapticStyle: HapticStyle = HapticStyle.ADAPTIVE,
+    val hapticStrength: Float = DEFAULT_HAPTIC_STRENGTH,
+    val hapticDurationMs: Int = DEFAULT_HAPTIC_DURATION_MS,
+    val hapticAccentEquals: Boolean = true,
     val buttonShapeStyle: ButtonShapeStyle = ButtonShapeStyle.PILL,
     val useDynamicColor: Boolean = true,
     val customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
@@ -90,6 +97,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var hasUserModifiedFeedbackPermission = false
     private var hasUserModifiedSoundVolume = false
     private var hasUserModifiedHapticIntensity = false
+    private var hasUserModifiedHapticStyle = false
+    private var hasUserModifiedHapticStrength = false
+    private var hasUserModifiedHapticDuration = false
+    private var hasUserModifiedHapticAccentEquals = false
     private var hasUserModifiedButtonShape = false
     private var hasUserModifiedDynamicColor = false
     private var hasUserModifiedCustomAccent = false
@@ -106,6 +117,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             isFeedbackPermissionGranted = initialPrefs.isFeedbackPermissionGranted,
             soundVolume = initialPrefs.soundVolume,
             hapticIntensity = initialPrefs.hapticIntensity,
+            hapticStyle = initialPrefs.hapticStyle,
+            hapticStrength = initialPrefs.hapticStrength,
+            hapticDurationMs = initialPrefs.hapticDurationMs,
+            hapticAccentEquals = initialPrefs.hapticAccentEquals,
             buttonShapeStyle = initialPrefs.buttonShapeStyle,
             useDynamicColor = initialPrefs.useDynamicColor,
             customAccentArgb = initialPrefs.customAccentArgb,
@@ -133,6 +148,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                         },
                         soundVolume = if (hasUserModifiedSoundVolume) current.soundVolume else dsPrefs.soundVolume,
                         hapticIntensity = if (hasUserModifiedHapticIntensity) current.hapticIntensity else dsPrefs.hapticIntensity,
+                        hapticStyle = if (hasUserModifiedHapticStyle) current.hapticStyle else dsPrefs.hapticStyle,
+                        hapticStrength = if (hasUserModifiedHapticStrength) current.hapticStrength else dsPrefs.hapticStrength,
+                        hapticDurationMs = if (hasUserModifiedHapticDuration) current.hapticDurationMs else dsPrefs.hapticDurationMs,
+                        hapticAccentEquals = if (hasUserModifiedHapticAccentEquals) current.hapticAccentEquals else dsPrefs.hapticAccentEquals,
                         buttonShapeStyle = if (hasUserModifiedButtonShape) current.buttonShapeStyle else dsPrefs.buttonShapeStyle,
                         useDynamicColor = if (hasUserModifiedDynamicColor) current.useDynamicColor else dsPrefs.useDynamicColor,
                         customAccentArgb = if (hasUserModifiedCustomAccent) current.customAccentArgb else dsPrefs.customAccentArgb,
@@ -159,6 +178,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             isFeedbackPermissionGranted = prefs.isFeedbackPermissionGranted,
             soundVolume = prefs.soundVolume,
             hapticIntensity = prefs.hapticIntensity,
+            hapticStyle = prefs.hapticStyle,
+            hapticStrength = prefs.hapticStrength,
+            hapticDurationMs = prefs.hapticDurationMs,
+            hapticAccentEquals = prefs.hapticAccentEquals,
             buttonShapeStyle = prefs.buttonShapeStyle,
             useDynamicColor = prefs.useDynamicColor,
             customAccentArgb = prefs.customAccentArgb,
@@ -177,6 +200,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             isFeedbackPermissionGranted = initialPrefs.isFeedbackPermissionGranted,
             soundVolume = initialPrefs.soundVolume,
             hapticIntensity = initialPrefs.hapticIntensity,
+            hapticStyle = initialPrefs.hapticStyle,
+            hapticStrength = initialPrefs.hapticStrength,
+            hapticDurationMs = initialPrefs.hapticDurationMs,
+            hapticAccentEquals = initialPrefs.hapticAccentEquals,
             buttonShapeStyle = initialPrefs.buttonShapeStyle,
             useDynamicColor = initialPrefs.useDynamicColor,
             customAccentArgb = initialPrefs.customAccentArgb,
@@ -192,7 +219,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
 
     fun performHaptic(type: CalcSoundType, view: View? = null) {
         val prefs = _optimisticPrefs.value
-        calcVibrator.vibrate(type, prefs.isVibrationEnabled, prefs.hapticIntensity, view)
+        calcVibrator.vibrate(
+            type = type,
+            enabled = prefs.isVibrationEnabled,
+            intensity = prefs.hapticIntensity,
+            style = prefs.hapticStyle,
+            strength = prefs.hapticStrength,
+            durationMs = prefs.hapticDurationMs,
+            accentEquals = prefs.hapticAccentEquals,
+            view = view
+        )
     }
 
     override fun onCleared() {
@@ -523,7 +559,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         hasUserModifiedVibration = true
         _optimisticPrefs.update { it.copy(isVibrationEnabled = next) }
         if (next) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
+            calcVibrator.vibrate(
+                type = CalcSoundType.OPERATOR,
+                enabled = true,
+                intensity = current.hapticIntensity,
+                style = current.hapticStyle,
+                strength = current.hapticStrength,
+                durationMs = current.hapticDurationMs,
+                accentEquals = current.hapticAccentEquals,
+                view = view
+            )
         }
         viewModelScope.launch {
             prefsRepository.setVibrationEnabled(next)
@@ -553,7 +598,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             soundEngine.play(CalcSoundType.UTILITY, enabled = true, volume = current.soundVolume)
         }
         if (vibrationEnabled) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
+            calcVibrator.vibrate(
+                type = CalcSoundType.OPERATOR,
+                enabled = true,
+                intensity = current.hapticIntensity,
+                style = current.hapticStyle,
+                strength = current.hapticStrength,
+                durationMs = current.hapticDurationMs,
+                accentEquals = current.hapticAccentEquals,
+                view = view
+            )
         }
         viewModelScope.launch {
             prefsRepository.setFeedbackEnabled(soundEnabled, vibrationEnabled)
@@ -587,7 +641,16 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             soundEngine.play(CalcSoundType.UTILITY, enabled = true, volume = current.soundVolume)
         }
         if (enableVibration) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = current.hapticIntensity, view = view)
+            calcVibrator.vibrate(
+                type = CalcSoundType.OPERATOR,
+                enabled = true,
+                intensity = current.hapticIntensity,
+                style = current.hapticStyle,
+                strength = current.hapticStrength,
+                durationMs = current.hapticDurationMs,
+                accentEquals = current.hapticAccentEquals,
+                view = view
+            )
         }
 
         viewModelScope.launch {
@@ -627,14 +690,112 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun setHapticIntensity(intensity: HapticIntensity, view: View? = null) {
+        val (presetStrength, presetDuration) = when (intensity) {
+            HapticIntensity.LIGHT -> 0.45f to 8
+            HapticIntensity.MEDIUM -> 0.70f to 12
+            HapticIntensity.STRONG -> 1.0f to 20
+        }
         hasUserModifiedHapticIntensity = true
-        _optimisticPrefs.update { it.copy(hapticIntensity = intensity) }
-        if (_optimisticPrefs.value.isVibrationEnabled) {
-            calcVibrator.vibrate(CalcSoundType.OPERATOR, enabled = true, intensity = intensity, view = view)
+        hasUserModifiedHapticStrength = true
+        hasUserModifiedHapticDuration = true
+        _optimisticPrefs.update {
+            it.copy(
+                hapticIntensity = intensity,
+                hapticStrength = presetStrength,
+                hapticDurationMs = presetDuration
+            )
+        }
+        val prefs = _optimisticPrefs.value
+        if (prefs.isVibrationEnabled) {
+            calcVibrator.vibrate(
+                type = CalcSoundType.OPERATOR,
+                enabled = true,
+                intensity = intensity,
+                style = prefs.hapticStyle,
+                strength = presetStrength,
+                durationMs = presetDuration,
+                accentEquals = prefs.hapticAccentEquals,
+                view = view
+            )
         }
         viewModelScope.launch {
-            prefsRepository.setHapticIntensity(intensity)
+            prefsRepository.setHapticPreset(intensity, presetStrength, presetDuration)
         }
+    }
+
+    fun setHapticStyle(style: HapticStyle, view: View? = null) {
+        hasUserModifiedHapticStyle = true
+        _optimisticPrefs.update { it.copy(hapticStyle = style) }
+        val prefs = _optimisticPrefs.value
+        if (prefs.isVibrationEnabled) {
+            calcVibrator.vibrate(
+                type = CalcSoundType.OPERATOR,
+                enabled = true,
+                intensity = prefs.hapticIntensity,
+                style = style,
+                strength = prefs.hapticStrength,
+                durationMs = prefs.hapticDurationMs,
+                accentEquals = prefs.hapticAccentEquals,
+                view = view
+            )
+        }
+        viewModelScope.launch {
+            prefsRepository.setHapticStyle(style)
+        }
+    }
+
+    fun setHapticStrength(strength: Float) {
+        val clamped = strength.coerceIn(0.15f, 1.0f)
+        hasUserModifiedHapticStrength = true
+        _optimisticPrefs.update { it.copy(hapticStrength = clamped) }
+        viewModelScope.launch {
+            prefsRepository.setHapticStrength(clamped)
+        }
+    }
+
+    fun setHapticDurationMs(durationMs: Int) {
+        val clamped = durationMs.coerceIn(4, 40)
+        hasUserModifiedHapticDuration = true
+        _optimisticPrefs.update { it.copy(hapticDurationMs = clamped) }
+        viewModelScope.launch {
+            prefsRepository.setHapticDurationMs(clamped)
+        }
+    }
+
+    fun setHapticAccentEquals(enabled: Boolean, view: View? = null) {
+        hasUserModifiedHapticAccentEquals = true
+        _optimisticPrefs.update { it.copy(hapticAccentEquals = enabled) }
+        val prefs = _optimisticPrefs.value
+        if (prefs.isVibrationEnabled) {
+            calcVibrator.vibrate(
+                type = CalcSoundType.EQUALS,
+                enabled = true,
+                intensity = prefs.hapticIntensity,
+                style = prefs.hapticStyle,
+                strength = prefs.hapticStrength,
+                durationMs = prefs.hapticDurationMs,
+                accentEquals = enabled,
+                view = view
+            )
+        }
+        viewModelScope.launch {
+            prefsRepository.setHapticAccentEquals(enabled)
+        }
+    }
+
+    fun testHaptic(type: CalcSoundType, view: View? = null) {
+        val prefs = _optimisticPrefs.value
+        calcVibrator.vibrate(
+            type = type,
+            enabled = true,
+            intensity = prefs.hapticIntensity,
+            style = prefs.hapticStyle,
+            strength = prefs.hapticStrength,
+            durationMs = prefs.hapticDurationMs,
+            accentEquals = prefs.hapticAccentEquals,
+            view = view,
+            forcePreview = true
+        )
     }
 
     fun setButtonShapeStyle(style: ButtonShapeStyle) {
@@ -680,6 +841,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     fun resetCustomizationsToDefaults() {
         hasUserModifiedSoundVolume = true
         hasUserModifiedHapticIntensity = true
+        hasUserModifiedHapticStyle = true
+        hasUserModifiedHapticStrength = true
+        hasUserModifiedHapticDuration = true
+        hasUserModifiedHapticAccentEquals = true
         hasUserModifiedButtonShape = true
         hasUserModifiedDynamicColor = true
         hasUserModifiedCustomAccent = true
@@ -689,6 +854,10 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(
                 soundVolume = DEFAULT_SOUND_VOLUME,
                 hapticIntensity = HapticIntensity.MEDIUM,
+                hapticStyle = HapticStyle.ADAPTIVE,
+                hapticStrength = DEFAULT_HAPTIC_STRENGTH,
+                hapticDurationMs = DEFAULT_HAPTIC_DURATION_MS,
+                hapticAccentEquals = true,
                 buttonShapeStyle = ButtonShapeStyle.PILL,
                 useDynamicColor = true,
                 customAccentArgb = DEFAULT_CUSTOM_ACCENT_ARGB,

@@ -34,7 +34,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -114,8 +113,10 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -127,6 +128,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -250,7 +252,7 @@ fun CalculatorDisplay(
     val particleProgress = remember { Animatable(0f) }
     var lizaReplayTrigger by remember { mutableIntStateOf(0) }
     var isLizaCooldown by remember { mutableStateOf(false) }
-    var displayRootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val displayRootCoordsRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
     var burstOriginOffset by remember { mutableStateOf<Offset?>(null) }
 
     LaunchedEffect(isLizaEasterEgg, lizaReplayTrigger) {
@@ -322,7 +324,7 @@ fun CalculatorDisplay(
     val ambientTertiaryColor = MaterialTheme.colorScheme.tertiary
     val errorBorderPath = remember { Path() }
 
-    val ambientDrift = if (state.ambientDisplayGlow) {
+    val ambientDriftState = if (state.ambientDisplayGlow) {
         val transition = rememberInfiniteTransition(label = "display_ambient_glow")
         transition.animateFloat(
             initialValue = 0f,
@@ -332,9 +334,9 @@ fun CalculatorDisplay(
                 repeatMode = RepeatMode.Reverse
             ),
             label = "display_ambient_phase"
-        ).value
+        )
     } else {
-        0f
+        null
     }
 
     Surface(
@@ -342,7 +344,6 @@ fun CalculatorDisplay(
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = modifier
             .fillMaxWidth()
-            .clip(cardShape)
             .pointerInput(state.isTopHistoryOpen) {
                 detectVerticalDragGestures(
                     onDragStart = { dragAccumulator = 0f },
@@ -365,6 +366,7 @@ fun CalculatorDisplay(
                 .fillMaxWidth()
                 .drawBehind {
                     if (state.ambientDisplayGlow) {
+                        val ambientDrift = ambientDriftState?.value ?: 0f
                         val c1 = Offset(
                             x = size.width * (0.20f + 0.16f * ambientDrift),
                             y = size.height * (0.28f + 0.14f * (1f - ambientDrift))
@@ -446,16 +448,15 @@ fun CalculatorDisplay(
                         )
                     }
                 }
-                .onGloballyPositioned { displayRootCoords = it },
+                .onGloballyPositioned { displayRootCoordsRef[0] = it },
             propagateMinConstraints = true
         ) {
-            Column(
+            Layout(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(horizontal = 18.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
+                content = {
                 // Symmetrical Top Utility Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -597,10 +598,16 @@ fun CalculatorDisplay(
                 val baseDisplayStyle = MaterialTheme.typography.displayLarge
                 val activeFontWeight = if (state.isResultDisplayed) FontWeight.Medium else FontWeight.Normal
 
-                BoxWithConstraints(
+                var displayWidthPx by remember { mutableIntStateOf(0) }
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = if (compactMode) 2.dp else 8.dp)
+                        .onSizeChanged { size ->
+                            if (size.width != displayWidthPx) {
+                                displayWidthPx = size.width
+                            }
+                        }
                         .graphicsLayer {
                             val t = errorTremor.value
                             if (t > 0f && t < 1f) {
@@ -614,8 +621,9 @@ fun CalculatorDisplay(
                         },
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    val safeAvailableWidthPx = with(density) {
-                        (maxWidth - 10.dp).toPx().coerceAtLeast(1f)
+                    val safeAvailableWidthPx = remember(displayWidthPx, density) {
+                        val extraPx = with(density) { 10.dp.toPx() }
+                        (displayWidthPx.toFloat() - extraPx).coerceAtLeast(1f)
                     }
                     val maxFontSp = if (compactMode) 44f else 58f
                     val minFontSp = if (compactMode) 20f else 24f
@@ -898,7 +906,7 @@ fun CalculatorDisplay(
                                             lizaReplayTrigger++
                                         }
                                         .onGloballyPositioned { pillCoords ->
-                                            val root = displayRootCoords
+                                            val root = displayRootCoordsRef[0]
                                             if (root != null && root.isAttached && pillCoords.isAttached) {
                                                 val rel = pillCoords.positionInRoot() - root.positionInRoot()
                                                 burstOriginOffset = Offset(
@@ -976,6 +984,27 @@ fun CalculatorDisplay(
                     )
                 }
             }
+                }
+            ) { measurables, constraints ->
+                val childConstraints = Constraints(
+                    minWidth = constraints.maxWidth,
+                    maxWidth = constraints.maxWidth,
+                    minHeight = 0,
+                    maxHeight = Constraints.Infinity
+                )
+                val topPlaceable = measurables[0].measure(childConstraints)
+                val bottomPlaceable = measurables[1].measure(childConstraints)
+                val contentHeight = topPlaceable.height + bottomPlaceable.height
+                val totalHeight = maxOf(constraints.minHeight, contentHeight).let { h ->
+                    if (constraints.hasBoundedHeight) h.coerceAtMost(constraints.maxHeight) else h
+                }
+                layout(constraints.maxWidth, totalHeight) {
+                    topPlaceable.placeRelative(0, 0)
+                    bottomPlaceable.placeRelative(
+                        0,
+                        (totalHeight - bottomPlaceable.height).coerceAtLeast(topPlaceable.height)
+                    )
+                }
             }
 
             // Heart & sparkle particle burst overlay (reads progress only in Draw phase for 120fps)

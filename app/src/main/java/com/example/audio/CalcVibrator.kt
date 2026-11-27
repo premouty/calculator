@@ -10,12 +10,22 @@ import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.annotation.RequiresApi
+import kotlin.math.roundToInt
 
 enum class HapticIntensity {
     LIGHT,
     MEDIUM,
     STRONG
 }
+
+enum class HapticStyle {
+    ADAPTIVE,
+    SYSTEM,
+    PULSE
+}
+
+const val DEFAULT_HAPTIC_STRENGTH: Float = 0.70f
+const val DEFAULT_HAPTIC_DURATION_MS: Int = 12
 
 class CalcVibrator(context: Context) {
 
@@ -29,26 +39,67 @@ class CalcVibrator(context: Context) {
         }
     }.getOrNull()
 
+    private val hasHardwareVibrator: Boolean = runCatching { vibrator?.hasVibrator() == true }.getOrDefault(false)
+    private val hasAmplitudeControl: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && hasHardwareVibrator) {
+        runCatching { vibrator?.hasAmplitudeControl() == true }.getOrDefault(false)
+    } else {
+        false
+    }
+    private val supportsPrimitiveClick: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasHardwareVibrator) {
+        runCatching {
+            vibrator?.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_CLICK) == true
+        }.getOrDefault(false)
+    } else {
+        false
+    }
+    private val supportsPrimitiveTick: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasHardwareVibrator) {
+        runCatching {
+            vibrator?.areAllPrimitivesSupported(VibrationEffect.Composition.PRIMITIVE_TICK) == true
+        }.getOrDefault(false)
+    } else {
+        false
+    }
+
     fun vibrate(
         type: CalcSoundType,
         enabled: Boolean,
         intensity: HapticIntensity = HapticIntensity.MEDIUM,
-        view: View? = null
+        style: HapticStyle = HapticStyle.ADAPTIVE,
+        strength: Float = DEFAULT_HAPTIC_STRENGTH,
+        durationMs: Int = DEFAULT_HAPTIC_DURATION_MS,
+        accentEquals: Boolean = true,
+        view: View? = null,
+        forcePreview: Boolean = false
     ) {
-        if (!enabled) return
+        if (!enabled && !forcePreview) return
+
+        val clampedStrength = strength.coerceIn(0.15f, 1.0f)
+        val clampedDuration = durationMs.coerceIn(4, 40)
+
+        if (style == HapticStyle.SYSTEM && view != null) {
+            if (performSystemHaptic(view, type, intensity, accentEquals)) {
+                return
+            }
+        }
 
         val vib = vibrator
-        val hardwareVibrated = if (vib != null && vib.hasVibrator()) {
+        val hardwareVibrated = if (vib != null && hasHardwareVibrator) {
             runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val effect = createEffectForApi26Plus(vib, type, intensity)
+                    val effect = when (style) {
+                        HapticStyle.PULSE -> createOneShotEffect(type, clampedStrength, clampedDuration, accentEquals)
+                        HapticStyle.ADAPTIVE,
+                        HapticStyle.SYSTEM -> createAdaptiveEffect(type, intensity, clampedStrength, clampedDuration, accentEquals)
+                    }
                     vibrateEffect(vib, effect)
                 } else {
-                    val legacyMs = when (intensity) {
-                        HapticIntensity.LIGHT -> if (type == CalcSoundType.EQUALS) 20L else 10L
-                        HapticIntensity.MEDIUM -> if (type == CalcSoundType.EQUALS) 36L else 20L
-                        HapticIntensity.STRONG -> if (type == CalcSoundType.EQUALS) 52L else 30L
+                    val factor = when {
+                        !accentEquals -> 1.0f
+                        type == CalcSoundType.EQUALS -> 1.35f
+                        type == CalcSoundType.OPERATOR || type == CalcSoundType.UTILITY -> 1.15f
+                        else -> 1.0f
                     }
+                    val legacyMs = (clampedDuration * factor).roundToInt().toLong().coerceIn(5L, 55L)
                     @Suppress("DEPRECATION")
                     vib.vibrate(legacyMs)
                 }
@@ -59,74 +110,102 @@ class CalcVibrator(context: Context) {
         }
 
         if (!hardwareVibrated && view != null) {
-            performViewFallbackHaptic(view, type)
+            performSystemHaptic(view, type, intensity, accentEquals)
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun createEffectForApi26Plus(
-        vib: Vibrator,
+    private fun createAdaptiveEffect(
         type: CalcSoundType,
-        intensity: HapticIntensity
+        intensity: HapticIntensity,
+        strength: Float,
+        fallbackDurationMs: Int,
+        accentEquals: Boolean
     ): VibrationEffect {
-        val durationMs = when (intensity) {
-            HapticIntensity.LIGHT -> when (type) {
-                CalcSoundType.DIGIT -> 10L
-                CalcSoundType.OPERATOR -> 14L
-                CalcSoundType.UTILITY -> 12L
-                CalcSoundType.EQUALS -> 22L
+        // API 30+: hardware LRA primitives produce crisp mechanical clicks without Xiaomi/OEM buzz
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (supportsPrimitiveTick || supportsPrimitiveClick)) {
+            val scale = when {
+                !accentEquals -> strength
+                type == CalcSoundType.EQUALS -> (strength * 1.18f).coerceAtMost(1.0f)
+                type == CalcSoundType.OPERATOR -> (strength * 0.96f).coerceIn(0.18f, 1.0f)
+                type == CalcSoundType.UTILITY -> (strength * 0.92f).coerceIn(0.18f, 1.0f)
+                else -> (strength * 0.85f).coerceIn(0.15f, 1.0f)
             }
-            HapticIntensity.MEDIUM -> when (type) {
-                CalcSoundType.DIGIT -> 18L
-                CalcSoundType.OPERATOR -> 24L
-                CalcSoundType.UTILITY -> 22L
-                CalcSoundType.EQUALS -> 38L
+            val composition = VibrationEffect.startComposition()
+            if (accentEquals && type == CalcSoundType.EQUALS && supportsPrimitiveClick && supportsPrimitiveTick) {
+                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, (scale * 0.72f).coerceIn(0.15f, 1.0f))
+                composition.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, scale, 22)
+            } else {
+                val primitive = when {
+                    type == CalcSoundType.DIGIT && supportsPrimitiveTick -> VibrationEffect.Composition.PRIMITIVE_TICK
+                    supportsPrimitiveClick -> VibrationEffect.Composition.PRIMITIVE_CLICK
+                    else -> VibrationEffect.Composition.PRIMITIVE_TICK
+                }
+                composition.addPrimitive(primitive, scale)
             }
-            HapticIntensity.STRONG -> when (type) {
-                CalcSoundType.DIGIT -> 28L
-                CalcSoundType.OPERATOR -> 36L
-                CalcSoundType.UTILITY -> 32L
-                CalcSoundType.EQUALS -> 54L
-            }
+            return composition.compose()
         }
-        val amplitude = if (vib.hasAmplitudeControl()) {
-            when (intensity) {
-                HapticIntensity.LIGHT -> when (type) {
-                    CalcSoundType.DIGIT -> 85
-                    CalcSoundType.OPERATOR -> 115
-                    CalcSoundType.UTILITY -> 100
-                    CalcSoundType.EQUALS -> 145
-                }
-                HapticIntensity.MEDIUM -> when (type) {
-                    CalcSoundType.DIGIT -> 175
-                    CalcSoundType.OPERATOR -> 215
-                    CalcSoundType.UTILITY -> 200
-                    CalcSoundType.EQUALS -> 255
-                }
-                HapticIntensity.STRONG -> when (type) {
-                    CalcSoundType.DIGIT -> 235
-                    CalcSoundType.OPERATOR -> 255
-                    CalcSoundType.UTILITY -> 245
-                    CalcSoundType.EQUALS -> 255
-                }
+
+        // API 29+: predefined hardware effects avoid generic continuous buzz on non-Pixel vibrators
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val effectId = when {
+                accentEquals && type == CalcSoundType.EQUALS && intensity == HapticIntensity.STRONG ->
+                    VibrationEffect.EFFECT_HEAVY_CLICK
+                accentEquals && type == CalcSoundType.EQUALS ->
+                    VibrationEffect.EFFECT_CLICK
+                intensity == HapticIntensity.LIGHT ->
+                    VibrationEffect.EFFECT_TICK
+                intensity == HapticIntensity.STRONG && (type == CalcSoundType.OPERATOR || type == CalcSoundType.UTILITY) ->
+                    VibrationEffect.EFFECT_CLICK
+                else ->
+                    VibrationEffect.EFFECT_TICK
             }
+            return VibrationEffect.createPredefined(effectId)
+        }
+
+        return createOneShotEffect(type, strength, fallbackDurationMs, accentEquals)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun createOneShotEffect(
+        type: CalcSoundType,
+        strength: Float,
+        durationMs: Int,
+        accentEquals: Boolean
+    ): VibrationEffect {
+        val durationFactor = when {
+            !accentEquals -> 1.0f
+            type == CalcSoundType.EQUALS -> 1.40f
+            type == CalcSoundType.OPERATOR || type == CalcSoundType.UTILITY -> 1.15f
+            else -> 1.0f
+        }
+        val ampFactor = when {
+            !accentEquals -> 1.0f
+            type == CalcSoundType.EQUALS -> 1.18f
+            type == CalcSoundType.OPERATOR || type == CalcSoundType.UTILITY -> 1.05f
+            else -> 0.92f
+        }
+        val resolvedMs = (durationMs * durationFactor).roundToInt().toLong().coerceIn(4L, 55L)
+        val amplitude = if (hasAmplitudeControl) {
+            (strength * ampFactor * 255f).roundToInt().coerceIn(28, 255)
         } else {
             VibrationEffect.DEFAULT_AMPLITUDE
         }
-        return VibrationEffect.createOneShot(durationMs, amplitude)
+        return VibrationEffect.createOneShot(resolvedMs, amplitude)
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun vibrateEffect(vib: Vibrator, effect: VibrationEffect) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // USAGE_TOUCH routes through tactile click HAL rather than media/ringtone rumble
             val attrs = VibrationAttributes.Builder()
-                .setUsage(VibrationAttributes.USAGE_MEDIA)
+                .setUsage(VibrationAttributes.USAGE_TOUCH)
                 .build()
             vib.vibrate(effect, attrs)
         } else {
             @Suppress("DEPRECATION")
             val audioAttrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
             @Suppress("DEPRECATION")
@@ -134,19 +213,32 @@ class CalcVibrator(context: Context) {
         }
     }
 
-    private fun performViewFallbackHaptic(view: View, type: CalcSoundType) {
-        val constant = when (type) {
-            CalcSoundType.DIGIT -> HapticFeedbackConstants.KEYBOARD_TAP
-            CalcSoundType.OPERATOR,
-            CalcSoundType.UTILITY -> HapticFeedbackConstants.VIRTUAL_KEY
-            CalcSoundType.EQUALS -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                HapticFeedbackConstants.CONFIRM
-            } else {
-                HapticFeedbackConstants.LONG_PRESS
+    private fun performSystemHaptic(
+        view: View,
+        type: CalcSoundType,
+        intensity: HapticIntensity,
+        accentEquals: Boolean
+    ): Boolean {
+        val constant = when (intensity) {
+            HapticIntensity.LIGHT -> when {
+                accentEquals && type == CalcSoundType.EQUALS -> HapticFeedbackConstants.KEYBOARD_TAP
+                else -> HapticFeedbackConstants.CLOCK_TICK
+            }
+            HapticIntensity.MEDIUM -> when {
+                accentEquals && type == CalcSoundType.EQUALS && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                    HapticFeedbackConstants.CONFIRM
+                accentEquals && type == CalcSoundType.EQUALS -> HapticFeedbackConstants.VIRTUAL_KEY
+                else -> HapticFeedbackConstants.KEYBOARD_TAP
+            }
+            HapticIntensity.STRONG -> when {
+                accentEquals && type == CalcSoundType.EQUALS && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                    HapticFeedbackConstants.CONFIRM
+                accentEquals && type == CalcSoundType.EQUALS -> HapticFeedbackConstants.LONG_PRESS
+                else -> HapticFeedbackConstants.VIRTUAL_KEY
             }
         }
         @Suppress("DEPRECATION")
-        view.performHapticFeedback(
+        return view.performHapticFeedback(
             constant,
             HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING or
                 HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING

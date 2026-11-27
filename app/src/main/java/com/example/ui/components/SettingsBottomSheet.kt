@@ -30,26 +30,35 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ColorLens
 import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.RoundedCorner
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -93,7 +102,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.R
+import com.example.audio.CalcSoundType
 import com.example.audio.HapticIntensity
+import com.example.audio.HapticStyle
 import com.example.data.preferences.ButtonShapeStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.theme.DEFAULT_CUSTOM_ACCENT_ARGB
@@ -121,6 +132,11 @@ fun SettingsBottomSheet(
     onPreviewSoundVolume: () -> Unit,
     onToggleVibration: () -> Unit,
     onSelectHapticIntensity: (HapticIntensity) -> Unit,
+    onSelectHapticStyle: (HapticStyle) -> Unit,
+    onChangeHapticStrength: (Float) -> Unit,
+    onChangeHapticDurationMs: (Int) -> Unit,
+    onToggleHapticAccentEquals: (Boolean) -> Unit,
+    onTestHaptic: (CalcSoundType) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
     onToggleDynamicColor: (Boolean) -> Unit,
     onSelectCustomAccentArgb: (Long) -> Unit,
@@ -132,6 +148,7 @@ fun SettingsBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
+    var vibrationExpanded by remember { mutableStateOf(false) }
 
     val resetSpin = remember { Animatable(0f) }
     val resetCardPulse = remember { Animatable(1f) }
@@ -202,11 +219,15 @@ fun SettingsBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 18.dp, bottom = 10.dp),
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                        .padding(top = 20.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -227,7 +248,9 @@ fun SettingsBottomSheet(
                         Text(
                             text = stringResource(R.string.settings_title),
                             style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -280,55 +303,65 @@ fun SettingsBottomSheet(
                         testTag = "settings_sound_switch"
                     )
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .alpha(if (state.isSoundEnabled) 1f else 0.65f)
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    AnimatedVisibility(
+                        visible = state.isSoundEnabled,
+                        enter = fadeIn(tween(180)) + expandVertically(
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ),
+                        exit = fadeOut(tween(140)) + shrinkVertically()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.GraphicEq,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = stringResource(R.string.settings_sound_volume_title),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh
-                            ) {
-                                Text(
-                                    text = "${(state.soundVolume * 100f).roundToInt()}%",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                        Slider(
-                            value = state.soundVolume,
-                            onValueChange = onChangeSoundVolume,
-                            onValueChangeFinished = onPreviewSoundVolume,
-                            valueRange = 0.05f..1.0f,
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("settings_sound_volume_slider")
-                        )
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.GraphicEq,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_sound_volume_title),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    Text(
+                                        text = "${(state.soundVolume * 100f).roundToInt()}%",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = state.soundVolume,
+                                onValueChange = onChangeSoundVolume,
+                                onValueChangeFinished = onPreviewSoundVolume,
+                                valueRange = 0.05f..1.0f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_sound_volume_slider")
+                            )
+                        }
                     }
 
                     SettingsCardDivider()
@@ -370,6 +403,266 @@ fun SettingsBottomSheet(
                                 onClick = { onSelectHapticIntensity(intensity) },
                                 modifier = Modifier.weight(1f),
                                 testTag = "settings_haptic_${intensity.name.lowercase()}"
+                            )
+                        }
+                    }
+                }
+
+                // Expandable detailed vibration controls (helpful for Xiaomi / non-Pixel motors)
+                val chevronRotationState = animateFloatAsState(
+                    targetValue = if (vibrationExpanded) 180f else 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "vibration_expand_chevron"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .minimumInteractiveComponentSize()
+                        .clickable { vibrationExpanded = !vibrationExpanded }
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .testTag("settings_haptic_advanced_toggle"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.settings_haptic_advanced_toggle),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { rotationZ = chevronRotationState.value }
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = vibrationExpanded,
+                    enter = fadeIn(tween(180)) + expandVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                    exit = fadeOut(tween(140)) + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(if (state.isVibrationEnabled) 1f else 0.72f)
+                            .padding(horizontal = 14.dp)
+                            .padding(bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Haptic engine style
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = stringResource(R.string.settings_haptic_style_title),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val styleOptions = listOf(
+                                    HapticStyle.ADAPTIVE to stringResource(R.string.settings_haptic_style_adaptive),
+                                    HapticStyle.SYSTEM to stringResource(R.string.settings_haptic_style_system),
+                                    HapticStyle.PULSE to stringResource(R.string.settings_haptic_style_pulse)
+                                )
+                                styleOptions.forEach { (style, label) ->
+                                    SettingsChoicePill(
+                                        label = label,
+                                        selected = state.hapticStyle == style,
+                                        onClick = { onSelectHapticStyle(style) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_haptic_style_${style.name.lowercase()}"
+                                    )
+                                }
+                            }
+                            Text(
+                                text = when (state.hapticStyle) {
+                                    HapticStyle.ADAPTIVE -> stringResource(R.string.settings_haptic_style_adaptive_hint)
+                                    HapticStyle.SYSTEM -> stringResource(R.string.settings_haptic_style_system_hint)
+                                    HapticStyle.PULSE -> stringResource(R.string.settings_haptic_style_pulse_hint)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Fine strength slider (active for ADAPTIVE and PULSE)
+                        val strengthEnabled = state.hapticStyle != HapticStyle.SYSTEM
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (strengthEnabled) 1f else 0.45f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Bolt,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_haptic_strength_title),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    Text(
+                                        text = "${(state.hapticStrength * 100f).roundToInt()}%",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = state.hapticStrength,
+                                onValueChange = onChangeHapticStrength,
+                                onValueChangeFinished = { onTestHaptic(CalcSoundType.DIGIT) },
+                                enabled = strengthEnabled,
+                                valueRange = 0.15f..1.0f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_haptic_strength_slider")
+                            )
+                        }
+
+                        // Fine pulse duration slider (4..40 ms for PULSE mode)
+                        val durationEnabled = state.hapticStyle == HapticStyle.PULSE
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (durationEnabled) 1f else 0.45f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Schedule,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_haptic_duration_title),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.settings_haptic_duration_value, state.hapticDurationMs),
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                            Slider(
+                                value = state.hapticDurationMs.toFloat(),
+                                onValueChange = { onChangeHapticDurationMs(it.roundToInt()) },
+                                onValueChangeFinished = { onTestHaptic(CalcSoundType.DIGIT) },
+                                enabled = durationEnabled,
+                                valueRange = 4f..40f,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_haptic_duration_slider")
+                            )
+                        }
+
+                        // Toggle distinct accent for '=' and operators
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onToggleHapticAccentEquals(!state.hapticAccentEquals) }
+                                .padding(vertical = 4.dp)
+                                .testTag("settings_haptic_accent_equals_row"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text(
+                                    text = stringResource(R.string.settings_haptic_accent_equals_title),
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = stringResource(R.string.settings_haptic_accent_equals_subtitle),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = state.hapticAccentEquals,
+                                onCheckedChange = onToggleHapticAccentEquals
+                            )
+                        }
+
+                        // Instant haptic test buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SettingsChoicePill(
+                                label = stringResource(R.string.settings_haptic_test_digit),
+                                icon = Icons.Rounded.TouchApp,
+                                selected = false,
+                                onClick = { onTestHaptic(CalcSoundType.DIGIT) },
+                                modifier = Modifier.weight(1f),
+                                testTag = "settings_haptic_test_digit_button"
+                            )
+                            SettingsChoicePill(
+                                label = stringResource(R.string.settings_haptic_test_equals),
+                                icon = Icons.Rounded.TouchApp,
+                                selected = false,
+                                onClick = { onTestHaptic(CalcSoundType.EQUALS) },
+                                modifier = Modifier.weight(1f),
+                                testTag = "settings_haptic_test_equals_button"
                             )
                         }
                     }

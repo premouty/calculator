@@ -85,6 +85,21 @@
     <string name="settings_haptic_light">Легка</string>
     <string name="settings_haptic_medium">Середня</string>
     <string name="settings_haptic_strong">Сильна</string>
+    <string name="settings_haptic_advanced_toggle">Розгорнуті налаштування вібрації</string>
+    <string name="settings_haptic_style_title">Режим вібрації</string>
+    <string name="settings_haptic_style_adaptive">Адаптивна</string>
+    <string name="settings_haptic_style_system">Системна</string>
+    <string name="settings_haptic_style_pulse">Імпульсна</string>
+    <string name="settings_haptic_style_adaptive_hint">Апаратні імпульси для точного відгуку (рекомендовано за замовчуванням)</string>
+    <string name="settings_haptic_style_system_hint">Системний двигун пристрою — оптимально для Xiaomi, HyperOS / MIUI та Samsung</string>
+    <string name="settings_haptic_style_pulse_hint">Ручне налаштування тривалості та сили імпульсу</string>
+    <string name="settings_haptic_strength_title">Сила відгуку</string>
+    <string name="settings_haptic_duration_title">Тривалість імпульсу</string>
+    <string name="settings_haptic_duration_value">%1$d мс</string>
+    <string name="settings_haptic_accent_equals_title">Виразніший відгук на «=» і дії</string>
+    <string name="settings_haptic_accent_equals_subtitle">Окремий акцент на клавішах операцій та дорівнює</string>
+    <string name="settings_haptic_test_digit">Тест клавіші</string>
+    <string name="settings_haptic_test_equals">Тест «=»</string>
 
     <string name="settings_theme_title">Тема оформлення</string>
     <string name="settings_dynamic_color_title">Динамічні кольори</string>
