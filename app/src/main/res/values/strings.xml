@@ -102,8 +102,21 @@
     <string name="settings_haptic_test_equals">Тест «=»</string>
 
     <string name="settings_theme_title">Тема оформлення</string>
-    <string name="settings_dynamic_color_title">Динамічні кольори</string>
-    <string name="settings_dynamic_color_subtitle">Адаптувати палітру під кольори шпалер (Material You)</string>
+    <string name="settings_dynamic_color_title">Динамічні кольори (Material You)</string>
+    <string name="settings_dynamic_color_subtitle">Адаптувати палітру під кольори шпалер</string>
+    <string name="settings_dynamic_source_title">Джерело акценту Material You</string>
+    <string name="settings_dynamic_source_primary">Основний</string>
+    <string name="settings_dynamic_source_secondary">Додатковий</string>
+    <string name="settings_dynamic_source_tertiary">Контраст</string>
+    <string name="settings_dynamic_vibrancy_title">Насиченість Material You</string>
+    <string name="settings_dynamic_vibrancy_natural">М’яка</string>
+    <string name="settings_dynamic_vibrancy_balanced">Баланс</string>
+    <string name="settings_dynamic_vibrancy_vivid">Яскрава</string>
+    <string name="settings_color_buttons_title">Кнопки під колір теми</string>
+    <string name="settings_color_buttons_digits">Цифри</string>
+    <string name="settings_color_buttons_operators">Оператори</string>
+    <string name="settings_color_buttons_utilities">AC та ⌫</string>
+    <string name="settings_color_buttons_fx">Панель fx</string>
     <string name="settings_custom_color_title">Власний колір акценту</string>
     <string name="settings_custom_color_hue">Відтінок</string>
     <string name="settings_custom_color_saturation">Насиченість</string>
@@ -141,8 +154,7 @@
 
     <string name="settings_display_glow_style_title">Стиль сяйва дисплея</string>
     <string name="settings_display_glow_aurora">Аврора</string>
-    <string name="settings_display_glow_neon_frame">Неон-рамка</string>
-    <string name="settings_display_glow_prism">Призма</string>
+    <string name="settings_display_glow_neon_frame">Рамка</string>
     <string name="settings_display_glow_horizon">Горизонт</string>
     <string name="settings_display_glow_intensity_title">Яскравість сяйва дисплея</string>
     <string name="settings_display_glow_color_title">Колір сяйва дисплея</string>
@@ -165,9 +177,13 @@
     <string name="settings_result_anim_pop">Стрибок</string>
     <string name="settings_result_anim_shimmer">Блік</string>
     <string name="settings_press_sparks_title">Мікро-іскри при натисканні</string>
-    <string name="settings_press_sparks_subtitle">Легкий розліт іскорок від дотику без навантаження на FPS</string>
-    <string name="settings_glow_breathing_title">Дихання підсвітки</string>
-    <string name="settings_glow_breathing_subtitle">М’яка жива пульсація сяйва клавіш і дисплея</string>
+    <string name="settings_press_sparks_subtitle">Помітний розліт іскорок поверх клавіш при дотику</string>
+    <string name="settings_press_sparks_style_title">Варіант мікро-іскор</string>
+    <string name="settings_press_sparks_sparks">Іскри</string>
+    <string name="settings_press_sparks_starlight">Зірочки</string>
+    <string name="settings_press_sparks_firework">Салют</string>
+    <string name="settings_glow_breathing_title">Дихання сяйва дисплея</string>
+    <string name="settings_glow_breathing_subtitle">М’яка жива пульсація атмосферного сяйва дисплея</string>
 
     <string name="settings_live_preview_title">Жива підказка результату</string>
     <string name="settings_live_preview_subtitle">Показувати попередній результат під час введення</string>

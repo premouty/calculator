@@ -47,9 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ColorLens
@@ -62,10 +60,8 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.RoundedCorner
-import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VolumeOff
@@ -84,6 +80,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -92,9 +89,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -107,24 +104,31 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.R
 import com.example.audio.CalcSoundType
 import com.example.audio.HapticIntensity
-import com.example.audio.HapticStyle
 import com.example.data.preferences.ButtonShapeStyle
 import com.example.data.preferences.DisplayGlowStyle
+import com.example.data.preferences.DynamicColorSource
+import com.example.data.preferences.DynamicColorVibrancy
 import com.example.data.preferences.GlowColorPreset
 import com.example.data.preferences.GlowTarget
-import com.example.data.preferences.KeyPressEffect
+import com.example.data.preferences.PressSparkStyle
 import com.example.data.preferences.ResultAnimStyle
-import com.example.data.preferences.ThemeAnimStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.theme.DEFAULT_CUSTOM_ACCENT_ARGB
 import com.example.ui.theme.ThemeMode
@@ -146,31 +150,33 @@ private val ACCENT_PRESETS: List<Long> = listOf(
 fun SettingsBottomSheet(
     state: CalculatorUiState,
     onDismiss: () -> Unit,
+    onSaveScrollPosition: (Int) -> Unit,
+    onToggleVibrationExpanded: (Boolean) -> Unit,
     onToggleSound: () -> Unit,
     onChangeSoundVolume: (Float) -> Unit,
     onPreviewSoundVolume: () -> Unit,
     onToggleVibration: () -> Unit,
     onSelectHapticIntensity: (HapticIntensity) -> Unit,
-    onSelectHapticStyle: (HapticStyle) -> Unit,
-    onChangeHapticStrength: (Float) -> Unit,
-    onChangeHapticDurationMs: (Int) -> Unit,
     onToggleHapticAccentEquals: (Boolean) -> Unit,
     onTestHaptic: (CalcSoundType) -> Unit,
     onSelectThemeMode: (ThemeMode) -> Unit,
     onToggleDynamicColor: (Boolean) -> Unit,
+    onSelectDynamicColorSource: (DynamicColorSource) -> Unit,
+    onSelectDynamicColorVibrancy: (DynamicColorVibrancy) -> Unit,
+    onToggleColorTintOperators: (Boolean) -> Unit,
+    onToggleColorTintUtilities: (Boolean) -> Unit,
+    onToggleColorTintDigits: (Boolean) -> Unit,
+    onToggleColorTintFx: (Boolean) -> Unit,
     onSelectCustomAccentArgb: (Long) -> Unit,
     onSelectButtonShape: (ButtonShapeStyle) -> Unit,
     onChangeKeypadScale: (Float) -> Unit,
     onChangeFxScale: (Float) -> Unit,
-    onToggleFxUnified: (Boolean) -> Unit,
     onSelectGlowTarget: (GlowTarget) -> Unit,
     onChangeGlowIntensity: (Float) -> Unit,
-    onSelectGlowColorPreset: (GlowColorPreset) -> Unit,
-    onSelectKeyPressEffect: (KeyPressEffect) -> Unit,
     onSelectResultAnimStyle: (ResultAnimStyle) -> Unit,
     onTogglePressSparks: (Boolean) -> Unit,
+    onSelectPressSparkStyle: (PressSparkStyle) -> Unit,
     onToggleGlowBreathing: (Boolean) -> Unit,
-    onSelectThemeAnimStyle: (ThemeAnimStyle) -> Unit,
     onToggleLivePreview: (Boolean) -> Unit,
     onToggleAmbientDisplayGlow: (Boolean) -> Unit,
     onSelectDisplayGlowStyle: (DisplayGlowStyle) -> Unit,
@@ -179,9 +185,41 @@ fun SettingsBottomSheet(
     onResetDefaults: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scrollState = rememberScrollState()
+    val scrollState = rememberScrollState(initial = state.settingsScrollPosition)
     val scope = rememberCoroutineScope()
-    var vibrationExpanded by remember { mutableStateOf(false) }
+    val vibrationExpanded = state.settingsVibrationExpanded
+
+    LaunchedEffect(scrollState) {
+        snapshotFlow { scrollState.value }
+            .collect { position -> onSaveScrollPosition(position) }
+    }
+
+    // Track whether the current touch gesture began while scrolled down so fast bottom-to-top
+    // scrolls/flings never spill into ModalBottomSheet swipe-to-dismiss.
+    var gestureStartedScrolled by remember { mutableStateOf(false) }
+    val sheetScrollGuard = remember(scrollState) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                return if ((gestureStartedScrolled || source == NestedScrollSource.SideEffect) && available.y > 0f) {
+                    Offset(0f, available.y)
+                } else {
+                    Offset.Zero
+                }
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                return if (gestureStartedScrolled && available.y > 0f) {
+                    Velocity(0f, available.y)
+                } else {
+                    Velocity.Zero
+                }
+            }
+        }
+    }
 
     val resetSpin = remember { Animatable(0f) }
     val resetCardPulse = remember { Animatable(1f) }
@@ -316,6 +354,17 @@ fun SettingsBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
+                    .pointerInput(scrollState) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.any { it.changedToDownIgnoreConsumed() }) {
+                                    gestureStartedScrolled = scrollState.value > 0
+                                }
+                            }
+                        }
+                    }
+                    .nestedScroll(sheetScrollGuard)
                     .verticalScroll(scrollState)
                     .padding(horizontal = 20.dp)
                     .padding(top = 10.dp, bottom = 18.dp)
@@ -408,40 +457,7 @@ fun SettingsBottomSheet(
                     testTag = "settings_vibration_switch"
                 )
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(if (state.isVibrationEnabled) 1f else 0.72f)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_haptic_intensity_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val hapticOptions = listOf(
-                            HapticIntensity.LIGHT to stringResource(R.string.settings_haptic_light),
-                            HapticIntensity.MEDIUM to stringResource(R.string.settings_haptic_medium),
-                            HapticIntensity.STRONG to stringResource(R.string.settings_haptic_strong)
-                        )
-                        hapticOptions.forEach { (intensity, label) ->
-                            SettingsChoicePill(
-                                label = label,
-                                selected = state.hapticIntensity == intensity,
-                                onClick = { onSelectHapticIntensity(intensity) },
-                                modifier = Modifier.weight(1f),
-                                testTag = "settings_haptic_${intensity.name.lowercase()}"
-                            )
-                        }
-                    }
-                }
-
-                // Expandable detailed vibration controls (helpful for Xiaomi / non-Pixel motors)
+                // Expandable detailed vibration controls (system haptic mode by default)
                 val chevronRotationState = animateFloatAsState(
                     targetValue = if (vibrationExpanded) 180f else 0f,
                     animationSpec = spring(
@@ -454,7 +470,7 @@ fun SettingsBottomSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .minimumInteractiveComponentSize()
-                        .clickable { vibrationExpanded = !vibrationExpanded }
+                        .clickable { onToggleVibrationExpanded(!vibrationExpanded) }
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                         .testTag("settings_haptic_advanced_toggle"),
                     verticalAlignment = Alignment.CenterVertically,
@@ -499,15 +515,18 @@ fun SettingsBottomSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .alpha(if (state.isVibrationEnabled) 1f else 0.72f)
                             .padding(horizontal = 14.dp)
                             .padding(bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Haptic engine style
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
-                                text = stringResource(R.string.settings_haptic_style_title),
+                                text = stringResource(R.string.settings_haptic_intensity_title),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -515,136 +534,21 @@ fun SettingsBottomSheet(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val styleOptions = listOf(
-                                    HapticStyle.ADAPTIVE to stringResource(R.string.settings_haptic_style_adaptive),
-                                    HapticStyle.SYSTEM to stringResource(R.string.settings_haptic_style_system),
-                                    HapticStyle.PULSE to stringResource(R.string.settings_haptic_style_pulse)
+                                val hapticOptions = listOf(
+                                    HapticIntensity.LIGHT to stringResource(R.string.settings_haptic_light),
+                                    HapticIntensity.MEDIUM to stringResource(R.string.settings_haptic_medium),
+                                    HapticIntensity.STRONG to stringResource(R.string.settings_haptic_strong)
                                 )
-                                styleOptions.forEach { (style, label) ->
+                                hapticOptions.forEach { (intensity, label) ->
                                     SettingsChoicePill(
                                         label = label,
-                                        selected = state.hapticStyle == style,
-                                        onClick = { onSelectHapticStyle(style) },
+                                        selected = state.hapticIntensity == intensity,
+                                        onClick = { onSelectHapticIntensity(intensity) },
                                         modifier = Modifier.weight(1f),
-                                        testTag = "settings_haptic_style_${style.name.lowercase()}"
+                                        testTag = "settings_haptic_${intensity.name.lowercase()}"
                                     )
                                 }
                             }
-                            Text(
-                                text = when (state.hapticStyle) {
-                                    HapticStyle.ADAPTIVE -> stringResource(R.string.settings_haptic_style_adaptive_hint)
-                                    HapticStyle.SYSTEM -> stringResource(R.string.settings_haptic_style_system_hint)
-                                    HapticStyle.PULSE -> stringResource(R.string.settings_haptic_style_pulse_hint)
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        // Fine strength slider (active for ADAPTIVE and PULSE)
-                        val strengthEnabled = state.hapticStyle != HapticStyle.SYSTEM
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .alpha(if (strengthEnabled) 1f else 0.45f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Bolt,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.settings_haptic_strength_title),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ) {
-                                    Text(
-                                        text = "${(state.hapticStrength * 100f).roundToInt()}%",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                            Slider(
-                                value = state.hapticStrength,
-                                onValueChange = onChangeHapticStrength,
-                                onValueChangeFinished = { onTestHaptic(CalcSoundType.DIGIT) },
-                                enabled = strengthEnabled,
-                                valueRange = 0.15f..1.0f,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("settings_haptic_strength_slider")
-                            )
-                        }
-
-                        // Fine pulse duration slider (4..40 ms for PULSE mode)
-                        val durationEnabled = state.hapticStyle == HapticStyle.PULSE
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .alpha(if (durationEnabled) 1f else 0.45f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Schedule,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.settings_haptic_duration_title),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.settings_haptic_duration_value, state.hapticDurationMs),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                            Slider(
-                                value = state.hapticDurationMs.toFloat(),
-                                onValueChange = { onChangeHapticDurationMs(it.roundToInt()) },
-                                onValueChangeFinished = { onTestHaptic(CalcSoundType.DIGIT) },
-                                enabled = durationEnabled,
-                                valueRange = 4f..40f,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("settings_haptic_duration_slider")
-                            )
                         }
 
                         // Toggle distinct accent for '=' and operators
@@ -750,6 +654,74 @@ fun SettingsBottomSheet(
                 )
 
                 AnimatedVisibility(
+                    visible = state.useDynamicColor,
+                    enter = fadeIn(tween(200)) + expandVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                    exit = fadeOut(tween(150)) + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_dynamic_source_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val sourceOptions = listOf(
+                                DynamicColorSource.PRIMARY to stringResource(R.string.settings_dynamic_source_primary),
+                                DynamicColorSource.SECONDARY to stringResource(R.string.settings_dynamic_source_secondary),
+                                DynamicColorSource.TERTIARY to stringResource(R.string.settings_dynamic_source_tertiary)
+                            )
+                            sourceOptions.forEach { (source, label) ->
+                                SettingsChoicePill(
+                                    label = label,
+                                    selected = state.dynamicColorSource == source,
+                                    onClick = { onSelectDynamicColorSource(source) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "settings_dynamic_source_${source.name.lowercase()}"
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = stringResource(R.string.settings_dynamic_vibrancy_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val vibrancyOptions = listOf(
+                                DynamicColorVibrancy.NATURAL to stringResource(R.string.settings_dynamic_vibrancy_natural),
+                                DynamicColorVibrancy.BALANCED to stringResource(R.string.settings_dynamic_vibrancy_balanced),
+                                DynamicColorVibrancy.VIVID to stringResource(R.string.settings_dynamic_vibrancy_vivid)
+                            )
+                            vibrancyOptions.forEach { (vibrancy, label) ->
+                                SettingsChoicePill(
+                                    label = label,
+                                    selected = state.dynamicColorVibrancy == vibrancy,
+                                    onClick = { onSelectDynamicColorVibrancy(vibrancy) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "settings_dynamic_vibrancy_${vibrancy.name.lowercase()}"
+                                )
+                            }
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
                     visible = !state.useDynamicColor,
                     enter = fadeIn(tween(200)) + expandVertically(
                         animationSpec = spring(
@@ -763,6 +735,63 @@ fun SettingsBottomSheet(
                         selectedAccentArgb = state.customAccentArgb,
                         onSelectAccentArgb = onSelectCustomAccentArgb
                     )
+                }
+
+                SettingsCardDivider()
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_color_buttons_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_color_buttons_digits),
+                            icon = if (state.colorTintDigits) Icons.Rounded.Check else null,
+                            selected = state.colorTintDigits,
+                            onClick = { onToggleColorTintDigits(!state.colorTintDigits) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_color_tint_digits"
+                        )
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_color_buttons_operators),
+                            icon = if (state.colorTintOperators) Icons.Rounded.Check else null,
+                            selected = state.colorTintOperators,
+                            onClick = { onToggleColorTintOperators(!state.colorTintOperators) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_color_tint_operators"
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_color_buttons_utilities),
+                            icon = if (state.colorTintUtilities) Icons.Rounded.Check else null,
+                            selected = state.colorTintUtilities,
+                            onClick = { onToggleColorTintUtilities(!state.colorTintUtilities) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_color_tint_utilities"
+                        )
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_color_buttons_fx),
+                            icon = if (state.colorTintFx) Icons.Rounded.Check else null,
+                            selected = state.colorTintFx,
+                            onClick = { onToggleColorTintFx(!state.colorTintFx) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_color_tint_fx"
+                        )
+                    }
                 }
 
                 SettingsCardDivider()
@@ -862,62 +891,6 @@ fun SettingsBottomSheet(
 
                 SettingsCardDivider()
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.ViewAgenda,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_fx_mode_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_fx_mode_detached),
-                            selected = !state.fxUnifiedWithKeypad,
-                            onClick = { onToggleFxUnified(false) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_fx_mode_detached"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_fx_mode_unified),
-                            selected = state.fxUnifiedWithKeypad,
-                            onClick = { onToggleFxUnified(true) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_fx_mode_unified"
-                        )
-                    }
-                    Text(
-                        text = stringResource(
-                            if (state.fxUnifiedWithKeypad) {
-                                R.string.settings_fx_mode_unified_hint
-                            } else {
-                                R.string.settings_fx_mode_detached_hint
-                            }
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                SettingsCardDivider()
-
                 SettingsScaleSliderRow(
                     icon = Icons.Rounded.ViewModule,
                     title = stringResource(R.string.settings_keypad_size_title),
@@ -1005,15 +978,6 @@ fun SettingsBottomSheet(
                             onValueChange = onChangeGlowIntensity,
                             testTag = "settings_glow_intensity_slider"
                         )
-
-                        SettingsCardDivider()
-
-                        GlowColorPresetSelector(
-                            title = stringResource(R.string.settings_glow_color_title),
-                            selectedPreset = state.glowColorPreset,
-                            onSelectPreset = onSelectGlowColorPreset,
-                            testTagPrefix = "settings_glow_color"
-                        )
                     }
                 }
 
@@ -1070,18 +1034,6 @@ fun SettingsBottomSheet(
                                     modifier = Modifier.weight(1f),
                                     testTag = "settings_display_glow_neon_frame"
                                 )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                SettingsChoicePill(
-                                    label = stringResource(R.string.settings_display_glow_prism),
-                                    selected = state.displayGlowStyle == DisplayGlowStyle.PRISM_WAVE,
-                                    onClick = { onSelectDisplayGlowStyle(DisplayGlowStyle.PRISM_WAVE) },
-                                    modifier = Modifier.weight(1f),
-                                    testTag = "settings_display_glow_prism_wave"
-                                )
                                 SettingsChoicePill(
                                     label = stringResource(R.string.settings_display_glow_horizon),
                                     selected = state.displayGlowStyle == DisplayGlowStyle.BOTTOM_HORIZON,
@@ -1115,143 +1067,8 @@ fun SettingsBottomSheet(
                 }
             }
 
-            // Hub Subsection C: Animations & Effects (including Theme transition animation)
+            // Hub Subsection C: Animations & Effects
             SettingsSectionCard(title = stringResource(R.string.settings_subsection_animations)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.DarkMode,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_theme_anim_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_theme_anim_circle),
-                            selected = state.themeAnimStyle == ThemeAnimStyle.CIRCLE_REVEAL,
-                            onClick = { onSelectThemeAnimStyle(ThemeAnimStyle.CIRCLE_REVEAL) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_anim_circle"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_theme_anim_crossfade),
-                            selected = state.themeAnimStyle == ThemeAnimStyle.CROSSFADE,
-                            onClick = { onSelectThemeAnimStyle(ThemeAnimStyle.CROSSFADE) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_anim_crossfade"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_theme_anim_diagonal),
-                            selected = state.themeAnimStyle == ThemeAnimStyle.DIAGONAL_WIPE,
-                            onClick = { onSelectThemeAnimStyle(ThemeAnimStyle.DIAGONAL_WIPE) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_anim_diagonal"
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_theme_anim_curtain),
-                            selected = state.themeAnimStyle == ThemeAnimStyle.VERTICAL_CURTAIN,
-                            onClick = { onSelectThemeAnimStyle(ThemeAnimStyle.VERTICAL_CURTAIN) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_anim_curtain"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_theme_anim_instant),
-                            selected = state.themeAnimStyle == ThemeAnimStyle.INSTANT,
-                            onClick = { onSelectThemeAnimStyle(ThemeAnimStyle.INSTANT) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_anim_instant"
-                        )
-                    }
-                }
-
-                SettingsCardDivider()
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Animation,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_key_effect_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_key_effect_spring),
-                            selected = state.keyPressEffect == KeyPressEffect.SPRING,
-                            onClick = { onSelectKeyPressEffect(KeyPressEffect.SPRING) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_key_effect_spring"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_key_effect_shockwave),
-                            selected = state.keyPressEffect == KeyPressEffect.SHOCKWAVE,
-                            onClick = { onSelectKeyPressEffect(KeyPressEffect.SHOCKWAVE) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_key_effect_shockwave"
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_key_effect_neon),
-                            selected = state.keyPressEffect == KeyPressEffect.NEON_BURST,
-                            onClick = { onSelectKeyPressEffect(KeyPressEffect.NEON_BURST) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_key_effect_neon_burst"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_key_effect_tilt),
-                            selected = state.keyPressEffect == KeyPressEffect.SOFT_TILT,
-                            onClick = { onSelectKeyPressEffect(KeyPressEffect.SOFT_TILT) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_key_effect_soft_tilt"
-                        )
-                    }
-                }
-
-                SettingsCardDivider()
-
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1294,6 +1111,50 @@ fun SettingsBottomSheet(
                     onToggle = { onTogglePressSparks(!state.pressSparksEnabled) },
                     testTag = "settings_press_sparks_switch"
                 )
+
+                AnimatedVisibility(
+                    visible = state.pressSparksEnabled,
+                    enter = fadeIn(tween(180)) + expandVertically(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ),
+                    exit = fadeOut(tween(140)) + shrinkVertically()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp)
+                            .padding(bottom = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_press_sparks_style_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val sparkOptions = listOf(
+                                PressSparkStyle.SPARKS to stringResource(R.string.settings_press_sparks_sparks),
+                                PressSparkStyle.STARLIGHT to stringResource(R.string.settings_press_sparks_starlight),
+                                PressSparkStyle.FIREWORK to stringResource(R.string.settings_press_sparks_firework)
+                            )
+                            sparkOptions.forEach { (style, label) ->
+                                SettingsChoicePill(
+                                    label = label,
+                                    selected = state.pressSparkStyle == style,
+                                    onClick = { onSelectPressSparkStyle(style) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "settings_press_spark_${style.name.lowercase()}"
+                                )
+                            }
+                        }
+                    }
+                }
 
                 SettingsCardDivider()
 
@@ -1804,9 +1665,14 @@ private fun SettingsChoicePill(
         animationSpec = tween(180),
         label = "choice_pill_bg"
     )
+    val selectedTextColor = if (MaterialTheme.colorScheme.primaryContainer.luminance() < 0.35f) {
+        Color.White
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
     val contentColor by animateColorAsState(
         targetValue = if (selected) {
-            MaterialTheme.colorScheme.onPrimaryContainer
+            selectedTextColor
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
         },
@@ -1831,7 +1697,7 @@ private fun SettingsChoicePill(
             BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
         },
         modifier = modifier
-            .height(40.dp)
+            .height(38.dp)
             .minimumInteractiveComponentSize()
             .graphicsLayer {
                 scaleX = scale
@@ -1842,21 +1708,21 @@ private fun SettingsChoicePill(
             .testTag(testTag)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)
         ) {
             if (icon != null) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
                     tint = contentColor,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
             }
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelLarge.copy(
+                style = MaterialTheme.typography.labelMedium.copy(
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                 ),
                 color = contentColor,
@@ -2025,24 +1891,44 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
         ),
         label = "preview_fx_open_mix"
     )
-    val unifiedMixState = animateFloatAsState(
-        targetValue = if (state.fxUnifiedWithKeypad) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = 0.88f,
-            stiffness = 520f
-        ),
-        label = "preview_unified_mix"
-    )
 
     val bgScreenColor = MaterialTheme.colorScheme.background
+    val isDarkPreview = bgScreenColor.luminance() < 0.5f
     val displayCardColor = MaterialTheme.colorScheme.surfaceContainer
-    val unifiedDeckColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val digitKeyColor = MaterialTheme.colorScheme.surfaceContainerHigh
-    val operatorKeyColor = MaterialTheme.colorScheme.secondaryContainer
-    val utilityKeyColor = MaterialTheme.colorScheme.tertiaryContainer
+    val digitKeyColor = if (state.colorTintDigits) {
+        lerp(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.primaryContainer,
+            if (isDarkPreview) 0.30f else 0.36f
+        )
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val operatorKeyColor = if (state.colorTintOperators) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val utilityKeyColor = if (state.colorTintUtilities) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
     val equalsKeyColor = MaterialTheme.colorScheme.primary
-    val fxModeKeyColor = MaterialTheme.colorScheme.secondaryContainer
-    val fxNormalKeyColor = MaterialTheme.colorScheme.surfaceContainerHigh
+    val fxModeKeyColor = if (state.colorTintOperators || state.colorTintFx) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val fxNormalKeyColor = if (state.colorTintFx) {
+        lerp(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.primaryContainer,
+            if (isDarkPreview) 0.30f else 0.36f
+        )
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
     val fxChipColor = if (previewFxOpen) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
@@ -2054,7 +1940,6 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
     val outlineTint = MaterialTheme.colorScheme.outlineVariant
     val primaryColor = MaterialTheme.colorScheme.primary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val resolvedKeyGlowColor = state.glowColorPreset.argb?.let { Color(it.toInt()) }
     val resolvedDisplayGlowColor = state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
 
     val cornerFactor = when (state.buttonShapeStyle) {
@@ -2097,7 +1982,6 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
             ) {
                 Canvas(modifier = Modifier.matchParentSize()) {
                     val pFx = fxOpenMixState.value.coerceIn(0f, 1f)
-                    val uMix = unifiedMixState.value.coerceIn(0f, 1f)
                     val padX = 9.dp.toPx()
                     val padTop = 7.dp.toPx()
                     val padBottom = 10.dp.toPx()
@@ -2107,15 +1991,12 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                     val kScale = state.keypadScale.coerceIn(0.80f, 1.18f)
                     val fScale = state.fxScale.coerceIn(0.78f, 1.25f)
 
-                    val baseRowH = 16.5f * unit * kScale
-                    val baseRowGap = 3.2f * unit * (0.85f + 0.15f * kScale)
-                    val compressedRatio = 1f - 0.22f * uMix * pFx
-                    val rowH = (baseRowH * compressedRatio).coerceAtLeast(11.5f * unit)
-                    val rowGap = (baseRowGap * (1f - 0.16f * uMix * pFx)).coerceAtLeast(2.0f * unit)
+                    val rowH = (16.5f * unit * kScale).coerceAtLeast(11.5f * unit)
+                    val rowGap = (3.2f * unit * (0.85f + 0.15f * kScale)).coerceAtLeast(2.0f * unit)
 
                     val keypadH = rowH * 5f + rowGap * 4f
                     val fxH = 39f * unit * fScale
-                    val fxGap = (3.5f + 1.5f * uMix) * unit
+                    val fxGap = 3.5f * unit
                     val stripH = 11.5f * unit
                     val fxVisibleH = (fxH + fxGap) * pFx
 
@@ -2174,16 +2055,6 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                     size = Size(size.width - 2.dp.toPx(), displayBottom + displayCorner - 1.dp.toPx()),
                                     cornerRadius = CornerRadius(displayCorner, displayCorner),
                                     style = Stroke(width = 1.6.dp.toPx())
-                                )
-                            }
-                            DisplayGlowStyle.PRISM_WAVE -> {
-                                drawRect(
-                                    brush = Brush.linearGradient(
-                                        0f to ambPrimary.copy(alpha = (0.30f * dGlowMul).coerceIn(0f, 0.58f)),
-                                        0.5f to ambTertiary.copy(alpha = (0.22f * dGlowMul).coerceIn(0f, 0.46f)),
-                                        1f to Color.Transparent
-                                    ),
-                                    size = Size(size.width, displayBottom)
                                 )
                             }
                             DisplayGlowStyle.BOTTOM_HORIZON -> {
@@ -2255,41 +2126,7 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                         cornerRadius = CornerRadius(chipH / 2f, chipH / 2f)
                     )
 
-                    // 3. Unified deck backing card drawn BEHIND both fx & keypad when unified
-                    val deckAlpha = uMix * pFx
-                    if (deckAlpha > 0.02f) {
-                        val deckPadX = 4.dp.toPx()
-                        val deckPadY = 4.dp.toPx()
-                        val deckCorner = 12.dp.toPx()
-                        drawRoundRect(
-                            color = unifiedDeckColor.copy(alpha = 0.94f * deckAlpha),
-                            topLeft = Offset(padX - deckPadX, deckTop - deckPadY),
-                            size = Size(
-                                innerW + deckPadX * 2f,
-                                (size.height - padBottom - deckTop) + deckPadY * 2f
-                            ),
-                            cornerRadius = CornerRadius(deckCorner, deckCorner)
-                        )
-                        drawRoundRect(
-                            color = outlineTint.copy(alpha = 0.30f * deckAlpha),
-                            topLeft = Offset(padX - deckPadX, deckTop - deckPadY),
-                            size = Size(
-                                innerW + deckPadX * 2f,
-                                (size.height - padBottom - deckTop) + deckPadY * 2f
-                            ),
-                            cornerRadius = CornerRadius(deckCorner, deckCorner),
-                            style = Stroke(width = 0.9.dp.toPx())
-                        )
-                        val sepY = keypadTop - fxGap * 0.5f
-                        drawLine(
-                            color = outlineTint.copy(alpha = 0.28f * deckAlpha),
-                            start = Offset(padX + 2.dp.toPx(), sepY),
-                            end = Offset(size.width - padX - 2.dp.toPx(), sepY),
-                            strokeWidth = 0.8.dp.toPx()
-                        )
-                    }
-
-                    // 4. Mini 5x3 fx Grid
+                    // 3. Mini 5x3 fx Grid (detached mode, DEG/RAD at col 0)
                     val glowIntensity = state.glowIntensity.coerceIn(0.35f, 1.65f)
                     if (pFx > 0.01f) {
                         clipRect(
@@ -2310,8 +2147,21 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                 for (c in 0 until fxCols) {
                                     val x = padX + c * (fxCellW + fxCellGap)
                                     val y = fxTop + r * (fxCellH + fxCellGap)
+                                    val isModeKey = r == 0 && c == 0
+                                    val hasMiniFxGlow = state.glowTarget == GlowTarget.ALL_KEYS ||
+                                        (state.glowTarget == GlowTarget.ACCENT_KEYS && isModeKey)
+                                    if (hasMiniFxGlow) {
+                                        val spread = 1.6f.dp.toPx() * (0.7f + 0.3f * glowIntensity)
+                                        val fxGlowAlpha = if (isModeKey) 0.32f else 0.18f
+                                        drawRoundRect(
+                                            color = primaryColor.copy(alpha = (fxGlowAlpha * glowIntensity * pFx).coerceIn(0f, 0.65f)),
+                                            topLeft = Offset(x - spread, y - spread),
+                                            size = Size(fxCellW + spread * 2f, fxCellH + spread * 2f),
+                                            cornerRadius = CornerRadius(fxCorner + spread, fxCorner + spread)
+                                        )
+                                    }
                                     val tileColor = when {
-                                        r == 0 && c == 1 -> fxModeKeyColor
+                                        isModeKey -> fxModeKeyColor
                                         else -> fxNormalKeyColor
                                     }.copy(alpha = pFx)
                                     drawRoundRect(
@@ -2320,23 +2170,12 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                         size = Size(fxCellW, fxCellH),
                                         cornerRadius = CornerRadius(fxCorner, fxCorner)
                                     )
-                                    if (state.glowTarget == GlowTarget.ALL_KEYS) {
-                                        val rimCol = (resolvedKeyGlowColor ?: primaryColor)
-                                            .copy(alpha = (0.34f * glowIntensity * pFx).coerceIn(0f, 0.72f))
-                                        drawRoundRect(
-                                            color = rimCol,
-                                            topLeft = Offset(x, y),
-                                            size = Size(fxCellW, fxCellH),
-                                            cornerRadius = CornerRadius(fxCorner, fxCorner),
-                                            style = Stroke(width = 0.8.dp.toPx())
-                                        )
-                                    }
                                 }
                             }
                         }
                     }
 
-                    // 5. Mini 4x5 Standard Keypad Grid
+                    // 4. Mini 4x5 Standard Keypad Grid
                     val kCols = 4
                     val kRows = 5
                     val colGap = 3.2f * unit
@@ -2356,10 +2195,7 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                 GlowTarget.ALL_KEYS -> true
                             }
                             if (hasMiniGlow) {
-                                val rawGlow = resolvedKeyGlowColor ?: when {
-                                    isUtility -> tertiaryColor
-                                    else -> primaryColor
-                                }
+                                val rawGlow = if (isUtility) tertiaryColor else primaryColor
                                 val spread = 2.2f.dp.toPx() * (0.7f + 0.3f * glowIntensity)
                                 val roleAlpha = if (isEquals || isUtility) 0.40f else 0.22f
                                 drawRoundRect(
@@ -2425,6 +2261,15 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                         .testTag("settings_layout_preview_toggle_fx")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
+                        val toggleTextColor = if (previewFxOpen) {
+                            if (MaterialTheme.colorScheme.primaryContainer.luminance() < 0.35f) {
+                                Color.White
+                            } else {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            }
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                         Text(
                             text = stringResource(
                                 if (previewFxOpen) {
@@ -2434,25 +2279,10 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                 }
                             ),
                             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (previewFxOpen) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            color = toggleTextColor
                         )
                     }
                 }
-
-                PreviewMetricPill(
-                    label = stringResource(R.string.settings_fx_mode_title),
-                    value = stringResource(
-                        if (state.fxUnifiedWithKeypad) {
-                            R.string.settings_fx_mode_unified
-                        } else {
-                            R.string.settings_fx_mode_detached
-                        }
-                    )
-                )
 
                 PreviewMetricPill(
                     label = stringResource(R.string.settings_keypad_size_title),

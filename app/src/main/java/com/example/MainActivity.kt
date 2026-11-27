@@ -70,6 +70,8 @@ class MainActivity : ComponentActivity() {
             ExpressiveCalcTheme(
                 themeMode = uiState.themeMode,
                 dynamicColor = uiState.useDynamicColor,
+                dynamicColorSource = uiState.dynamicColorSource,
+                dynamicColorVibrancy = uiState.dynamicColorVibrancy,
                 customAccentArgb = uiState.customAccentArgb
             ) {
                 CalculatorScreen(

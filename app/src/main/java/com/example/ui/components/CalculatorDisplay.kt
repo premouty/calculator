@@ -558,36 +558,6 @@ fun CalculatorDisplay(
                                 )
                             }
 
-                            DisplayGlowStyle.PRISM_WAVE -> {
-                                val shiftX = size.width * 0.26f * (ambientDrift - 0.5f)
-                                drawRect(
-                                    brush = Brush.linearGradient(
-                                        0.0f to ambientPrimaryColor.copy(alpha = (0.28f * intensity).coerceIn(0f, 0.56f)),
-                                        0.50f to ambientTertiaryColor.copy(alpha = (0.20f * intensity).coerceIn(0f, 0.44f)),
-                                        1.0f to ambientPrimaryColor.copy(alpha = (0.10f * intensity).coerceIn(0f, 0.28f)),
-                                        start = Offset(shiftX, 0f),
-                                        end = Offset(size.width + shiftX, visibleBottom)
-                                    ),
-                                    size = Size(size.width, visibleBottom)
-                                )
-                                val cWave = Offset(
-                                    x = size.width * (0.30f + 0.40f * ambientDrift),
-                                    y = visibleBottom * 0.62f
-                                )
-                                val rWave = size.width * 0.58f
-                                drawCircle(
-                                    brush = Brush.radialGradient(
-                                        0.0f to Color.White.copy(alpha = (0.14f * intensity).coerceIn(0f, 0.28f)),
-                                        0.45f to ambientTertiaryColor.copy(alpha = (0.18f * intensity).coerceIn(0f, 0.42f)),
-                                        1.0f to Color.Transparent,
-                                        center = cWave,
-                                        radius = rWave
-                                    ),
-                                    center = cWave,
-                                    radius = rWave
-                                )
-                            }
-
                             DisplayGlowStyle.BOTTOM_HORIZON -> {
                                 val horizonCenter = Offset(
                                     x = size.width * (0.36f + 0.28f * ambientDrift),

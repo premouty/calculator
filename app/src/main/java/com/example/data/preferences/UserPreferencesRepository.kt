@@ -60,6 +60,12 @@ enum class KeyPressEffect {
     SOFT_TILT
 }
 
+enum class PressSparkStyle {
+    SPARKS,
+    STARLIGHT,
+    FIREWORK
+}
+
 enum class ResultAnimStyle {
     SLIDE_UP,
     ELASTIC_POP,
@@ -77,8 +83,19 @@ enum class ThemeAnimStyle {
 enum class DisplayGlowStyle {
     AURORA,
     NEON_FRAME,
-    PRISM_WAVE,
     BOTTOM_HORIZON
+}
+
+enum class DynamicColorSource {
+    PRIMARY,
+    SECONDARY,
+    TERTIARY
+}
+
+enum class DynamicColorVibrancy {
+    NATURAL,
+    BALANCED,
+    VIVID
 }
 
 data class UserCalcPreferences(
@@ -90,13 +107,19 @@ data class UserCalcPreferences(
     val isFeedbackPermissionGranted: Boolean = false,
     val soundVolume: Float = DEFAULT_SOUND_VOLUME,
     val hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
-    val hapticStyle: HapticStyle = HapticStyle.ADAPTIVE,
+    val hapticStyle: HapticStyle = HapticStyle.SYSTEM,
     val hapticStrength: Float = DEFAULT_HAPTIC_STRENGTH,
     val hapticDurationMs: Int = DEFAULT_HAPTIC_DURATION_MS,
     val hapticAccentEquals: Boolean = true,
     val buttonShapeStyle: ButtonShapeStyle = ButtonShapeStyle.PILL,
     val useDynamicColor: Boolean = true,
+    val dynamicColorSource: DynamicColorSource = DynamicColorSource.PRIMARY,
+    val dynamicColorVibrancy: DynamicColorVibrancy = DynamicColorVibrancy.BALANCED,
     val customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
+    val colorTintOperators: Boolean = true,
+    val colorTintUtilities: Boolean = true,
+    val colorTintDigits: Boolean = true,
+    val colorTintFx: Boolean = true,
     val showLivePreview: Boolean = true,
     val ambientDisplayGlow: Boolean = false,
     val keypadScale: Float = DEFAULT_KEYPAD_SCALE,
@@ -108,8 +131,9 @@ data class UserCalcPreferences(
     val keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     val resultAnimStyle: ResultAnimStyle = ResultAnimStyle.SLIDE_UP,
     val pressSparksEnabled: Boolean = false,
+    val pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
     val glowBreathingEnabled: Boolean = false,
-    val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.CIRCLE_REVEAL,
+    val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.INSTANT,
     val displayGlowStyle: DisplayGlowStyle = DisplayGlowStyle.AURORA,
     val displayGlowIntensity: Float = DEFAULT_GLOW_INTENSITY,
     val displayGlowColorPreset: GlowColorPreset = GlowColorPreset.AUTO
@@ -132,7 +156,13 @@ class UserPreferencesRepository(private val context: Context) {
         val HAPTIC_ACCENT_EQUALS = booleanPreferencesKey("haptic_accent_equals")
         val BUTTON_SHAPE_STYLE = stringPreferencesKey("button_shape_style")
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
+        val DYNAMIC_COLOR_SOURCE = stringPreferencesKey("dynamic_color_source")
+        val DYNAMIC_COLOR_VIBRANCY = stringPreferencesKey("dynamic_color_vibrancy")
         val CUSTOM_ACCENT_ARGB = longPreferencesKey("custom_accent_argb")
+        val COLOR_TINT_OPERATORS = booleanPreferencesKey("color_tint_operators")
+        val COLOR_TINT_UTILITIES = booleanPreferencesKey("color_tint_utilities")
+        val COLOR_TINT_DIGITS = booleanPreferencesKey("color_tint_digits")
+        val COLOR_TINT_FX = booleanPreferencesKey("color_tint_fx")
         val SHOW_LIVE_PREVIEW = booleanPreferencesKey("show_live_preview")
         val AMBIENT_DISPLAY_GLOW = booleanPreferencesKey("ambient_display_glow")
         val KEYPAD_SCALE = floatPreferencesKey("keypad_scale")
@@ -144,6 +174,7 @@ class UserPreferencesRepository(private val context: Context) {
         val KEY_PRESS_EFFECT = stringPreferencesKey("key_press_effect")
         val RESULT_ANIM_STYLE = stringPreferencesKey("result_anim_style")
         val PRESS_SPARKS_ENABLED = booleanPreferencesKey("press_sparks_enabled")
+        val PRESS_SPARK_STYLE = stringPreferencesKey("press_spark_style")
         val GLOW_BREATHING_ENABLED = booleanPreferencesKey("glow_breathing_enabled")
         val THEME_ANIM_STYLE = stringPreferencesKey("theme_anim_style")
         val DISPLAY_GLOW_STYLE = stringPreferencesKey("display_glow_style")
@@ -167,7 +198,13 @@ class UserPreferencesRepository(private val context: Context) {
         const val HAPTIC_ACCENT_EQUALS = "haptic_accent_equals"
         const val BUTTON_SHAPE_STYLE = "button_shape_style"
         const val USE_DYNAMIC_COLOR = "use_dynamic_color"
+        const val DYNAMIC_COLOR_SOURCE = "dynamic_color_source"
+        const val DYNAMIC_COLOR_VIBRANCY = "dynamic_color_vibrancy"
         const val CUSTOM_ACCENT_ARGB = "custom_accent_argb"
+        const val COLOR_TINT_OPERATORS = "color_tint_operators"
+        const val COLOR_TINT_UTILITIES = "color_tint_utilities"
+        const val COLOR_TINT_DIGITS = "color_tint_digits"
+        const val COLOR_TINT_FX = "color_tint_fx"
         const val SHOW_LIVE_PREVIEW = "show_live_preview"
         const val AMBIENT_DISPLAY_GLOW = "ambient_display_glow"
         const val KEYPAD_SCALE = "keypad_scale"
@@ -179,6 +216,7 @@ class UserPreferencesRepository(private val context: Context) {
         const val KEY_PRESS_EFFECT = "key_press_effect"
         const val RESULT_ANIM_STYLE = "result_anim_style"
         const val PRESS_SPARKS_ENABLED = "press_sparks_enabled"
+        const val PRESS_SPARK_STYLE = "press_spark_style"
         const val GLOW_BREATHING_ENABLED = "glow_breathing_enabled"
         const val THEME_ANIM_STYLE = "theme_anim_style"
         const val DISPLAY_GLOW_STYLE = "display_glow_style"
@@ -202,9 +240,7 @@ class UserPreferencesRepository(private val context: Context) {
             runCatching { HapticIntensity.valueOf(it) }.getOrNull()
         } ?: HapticIntensity.MEDIUM
 
-        val hapticStyle = syncPrefs.getString(SyncKeys.HAPTIC_STYLE, null)?.let {
-            runCatching { HapticStyle.valueOf(it) }.getOrNull()
-        } ?: HapticStyle.ADAPTIVE
+        val hapticStyle = HapticStyle.SYSTEM
 
         val hapticStrength = syncPrefs.getFloat(SyncKeys.HAPTIC_STRENGTH, DEFAULT_HAPTIC_STRENGTH)
             .coerceIn(0.15f, 1.0f)
@@ -234,21 +270,19 @@ class UserPreferencesRepository(private val context: Context) {
         val glowIntensity = syncPrefs.getFloat(SyncKeys.GLOW_INTENSITY, DEFAULT_GLOW_INTENSITY)
             .coerceIn(0.35f, 1.65f)
 
-        val glowColorPreset = syncPrefs.getString(SyncKeys.GLOW_COLOR_PRESET, null)?.let {
-            runCatching { GlowColorPreset.valueOf(it) }.getOrNull()
-        } ?: GlowColorPreset.AUTO
+        val glowColorPreset = GlowColorPreset.AUTO
 
-        val keyPressEffect = syncPrefs.getString(SyncKeys.KEY_PRESS_EFFECT, null)?.let {
-            runCatching { KeyPressEffect.valueOf(it) }.getOrNull()
-        } ?: KeyPressEffect.SPRING
+        val keyPressEffect = KeyPressEffect.SPRING
 
         val resultAnimStyle = syncPrefs.getString(SyncKeys.RESULT_ANIM_STYLE, null)?.let {
             runCatching { ResultAnimStyle.valueOf(it) }.getOrNull()
         } ?: ResultAnimStyle.SLIDE_UP
 
-        val themeAnimStyle = syncPrefs.getString(SyncKeys.THEME_ANIM_STYLE, null)?.let {
-            runCatching { ThemeAnimStyle.valueOf(it) }.getOrNull()
-        } ?: ThemeAnimStyle.CIRCLE_REVEAL
+        val pressSparkStyle = syncPrefs.getString(SyncKeys.PRESS_SPARK_STYLE, null)?.let {
+            runCatching { PressSparkStyle.valueOf(it) }.getOrNull()
+        } ?: PressSparkStyle.SPARKS
+
+        val themeAnimStyle = ThemeAnimStyle.INSTANT
 
         val displayGlowStyle = syncPrefs.getString(SyncKeys.DISPLAY_GLOW_STYLE, null)?.let {
             runCatching { DisplayGlowStyle.valueOf(it) }.getOrNull()
@@ -260,6 +294,14 @@ class UserPreferencesRepository(private val context: Context) {
         val displayGlowColorPreset = syncPrefs.getString(SyncKeys.DISPLAY_GLOW_COLOR_PRESET, null)?.let {
             runCatching { GlowColorPreset.valueOf(it) }.getOrNull()
         } ?: GlowColorPreset.AUTO
+
+        val dynamicColorSource = syncPrefs.getString(SyncKeys.DYNAMIC_COLOR_SOURCE, null)?.let {
+            runCatching { DynamicColorSource.valueOf(it) }.getOrNull()
+        } ?: DynamicColorSource.PRIMARY
+
+        val dynamicColorVibrancy = syncPrefs.getString(SyncKeys.DYNAMIC_COLOR_VIBRANCY, null)?.let {
+            runCatching { DynamicColorVibrancy.valueOf(it) }.getOrNull()
+        } ?: DynamicColorVibrancy.BALANCED
 
         return UserCalcPreferences(
             themeMode = theme,
@@ -276,18 +318,25 @@ class UserPreferencesRepository(private val context: Context) {
             hapticAccentEquals = hapticAccentEquals,
             buttonShapeStyle = buttonShapeStyle,
             useDynamicColor = syncPrefs.getBoolean(SyncKeys.USE_DYNAMIC_COLOR, true),
+            dynamicColorSource = dynamicColorSource,
+            dynamicColorVibrancy = dynamicColorVibrancy,
             customAccentArgb = syncPrefs.getLong(SyncKeys.CUSTOM_ACCENT_ARGB, DEFAULT_CUSTOM_ACCENT_ARGB),
+            colorTintOperators = syncPrefs.getBoolean(SyncKeys.COLOR_TINT_OPERATORS, true),
+            colorTintUtilities = syncPrefs.getBoolean(SyncKeys.COLOR_TINT_UTILITIES, true),
+            colorTintDigits = syncPrefs.getBoolean(SyncKeys.COLOR_TINT_DIGITS, true),
+            colorTintFx = syncPrefs.getBoolean(SyncKeys.COLOR_TINT_FX, true),
             showLivePreview = syncPrefs.getBoolean(SyncKeys.SHOW_LIVE_PREVIEW, true),
             ambientDisplayGlow = syncPrefs.getBoolean(SyncKeys.AMBIENT_DISPLAY_GLOW, false),
             keypadScale = keypadScale,
             fxScale = fxScale,
-            fxUnifiedWithKeypad = syncPrefs.getBoolean(SyncKeys.FX_UNIFIED_WITH_KEYPAD, false),
+            fxUnifiedWithKeypad = false,
             glowTarget = glowTarget,
             glowIntensity = glowIntensity,
             glowColorPreset = glowColorPreset,
             keyPressEffect = keyPressEffect,
             resultAnimStyle = resultAnimStyle,
             pressSparksEnabled = syncPrefs.getBoolean(SyncKeys.PRESS_SPARKS_ENABLED, false),
+            pressSparkStyle = pressSparkStyle,
             glowBreathingEnabled = syncPrefs.getBoolean(SyncKeys.GLOW_BREATHING_ENABLED, false),
             themeAnimStyle = themeAnimStyle,
             displayGlowStyle = displayGlowStyle,
@@ -315,9 +364,7 @@ class UserPreferencesRepository(private val context: Context) {
             runCatching { HapticIntensity.valueOf(it) }.getOrNull()
         } ?: HapticIntensity.MEDIUM
 
-        val hapticStyle = prefs[Keys.HAPTIC_STYLE]?.let {
-            runCatching { HapticStyle.valueOf(it) }.getOrNull()
-        } ?: HapticStyle.ADAPTIVE
+        val hapticStyle = HapticStyle.SYSTEM
 
         val hapticStrength = (prefs[Keys.HAPTIC_STRENGTH] ?: DEFAULT_HAPTIC_STRENGTH).coerceIn(0.15f, 1.0f)
         val hapticDurationMs = (prefs[Keys.HAPTIC_DURATION_MS] ?: DEFAULT_HAPTIC_DURATION_MS).coerceIn(4, 40)
@@ -328,30 +375,37 @@ class UserPreferencesRepository(private val context: Context) {
         } ?: ButtonShapeStyle.PILL
 
         val useDynamicColor = prefs[Keys.USE_DYNAMIC_COLOR] ?: true
+        val dynamicColorSource = prefs[Keys.DYNAMIC_COLOR_SOURCE]?.let {
+            runCatching { DynamicColorSource.valueOf(it) }.getOrNull()
+        } ?: DynamicColorSource.PRIMARY
+        val dynamicColorVibrancy = prefs[Keys.DYNAMIC_COLOR_VIBRANCY]?.let {
+            runCatching { DynamicColorVibrancy.valueOf(it) }.getOrNull()
+        } ?: DynamicColorVibrancy.BALANCED
         val customAccentArgb = prefs[Keys.CUSTOM_ACCENT_ARGB] ?: DEFAULT_CUSTOM_ACCENT_ARGB
+        val colorTintOperators = prefs[Keys.COLOR_TINT_OPERATORS] ?: true
+        val colorTintUtilities = prefs[Keys.COLOR_TINT_UTILITIES] ?: true
+        val colorTintDigits = prefs[Keys.COLOR_TINT_DIGITS] ?: true
+        val colorTintFx = prefs[Keys.COLOR_TINT_FX] ?: true
         val showLivePreview = prefs[Keys.SHOW_LIVE_PREVIEW] ?: true
         val ambientDisplayGlow = prefs[Keys.AMBIENT_DISPLAY_GLOW] ?: false
         val keypadScale = (prefs[Keys.KEYPAD_SCALE] ?: DEFAULT_KEYPAD_SCALE).coerceIn(0.80f, 1.18f)
         val fxScale = (prefs[Keys.FX_SCALE] ?: DEFAULT_FX_SCALE).coerceIn(0.78f, 1.25f)
-        val fxUnifiedWithKeypad = prefs[Keys.FX_UNIFIED_WITH_KEYPAD] ?: false
+        val fxUnifiedWithKeypad = false
         val glowTarget = prefs[Keys.GLOW_TARGET]?.let {
             runCatching { GlowTarget.valueOf(it) }.getOrNull()
         } ?: GlowTarget.ACCENT_KEYS
         val glowIntensity = (prefs[Keys.GLOW_INTENSITY] ?: DEFAULT_GLOW_INTENSITY).coerceIn(0.35f, 1.65f)
-        val glowColorPreset = prefs[Keys.GLOW_COLOR_PRESET]?.let {
-            runCatching { GlowColorPreset.valueOf(it) }.getOrNull()
-        } ?: GlowColorPreset.AUTO
-        val keyPressEffect = prefs[Keys.KEY_PRESS_EFFECT]?.let {
-            runCatching { KeyPressEffect.valueOf(it) }.getOrNull()
-        } ?: KeyPressEffect.SPRING
+        val glowColorPreset = GlowColorPreset.AUTO
+        val keyPressEffect = KeyPressEffect.SPRING
         val resultAnimStyle = prefs[Keys.RESULT_ANIM_STYLE]?.let {
             runCatching { ResultAnimStyle.valueOf(it) }.getOrNull()
         } ?: ResultAnimStyle.SLIDE_UP
         val pressSparksEnabled = prefs[Keys.PRESS_SPARKS_ENABLED] ?: false
+        val pressSparkStyle = prefs[Keys.PRESS_SPARK_STYLE]?.let {
+            runCatching { PressSparkStyle.valueOf(it) }.getOrNull()
+        } ?: PressSparkStyle.SPARKS
         val glowBreathingEnabled = prefs[Keys.GLOW_BREATHING_ENABLED] ?: false
-        val themeAnimStyle = prefs[Keys.THEME_ANIM_STYLE]?.let {
-            runCatching { ThemeAnimStyle.valueOf(it) }.getOrNull()
-        } ?: ThemeAnimStyle.CIRCLE_REVEAL
+        val themeAnimStyle = ThemeAnimStyle.INSTANT
         val displayGlowStyle = prefs[Keys.DISPLAY_GLOW_STYLE]?.let {
             runCatching { DisplayGlowStyle.valueOf(it) }.getOrNull()
         } ?: DisplayGlowStyle.AURORA
@@ -404,8 +458,26 @@ class UserPreferencesRepository(private val context: Context) {
         if (!syncPrefs.contains(SyncKeys.USE_DYNAMIC_COLOR) && prefs.contains(Keys.USE_DYNAMIC_COLOR)) {
             syncPrefs.edit().putBoolean(SyncKeys.USE_DYNAMIC_COLOR, useDynamicColor).apply()
         }
+        if (!syncPrefs.contains(SyncKeys.DYNAMIC_COLOR_SOURCE) && prefs.contains(Keys.DYNAMIC_COLOR_SOURCE)) {
+            syncPrefs.edit().putString(SyncKeys.DYNAMIC_COLOR_SOURCE, dynamicColorSource.name).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.DYNAMIC_COLOR_VIBRANCY) && prefs.contains(Keys.DYNAMIC_COLOR_VIBRANCY)) {
+            syncPrefs.edit().putString(SyncKeys.DYNAMIC_COLOR_VIBRANCY, dynamicColorVibrancy.name).apply()
+        }
         if (!syncPrefs.contains(SyncKeys.CUSTOM_ACCENT_ARGB) && prefs.contains(Keys.CUSTOM_ACCENT_ARGB)) {
             syncPrefs.edit().putLong(SyncKeys.CUSTOM_ACCENT_ARGB, customAccentArgb).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.COLOR_TINT_OPERATORS) && prefs.contains(Keys.COLOR_TINT_OPERATORS)) {
+            syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_OPERATORS, colorTintOperators).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.COLOR_TINT_UTILITIES) && prefs.contains(Keys.COLOR_TINT_UTILITIES)) {
+            syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_UTILITIES, colorTintUtilities).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.COLOR_TINT_DIGITS) && prefs.contains(Keys.COLOR_TINT_DIGITS)) {
+            syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_DIGITS, colorTintDigits).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.COLOR_TINT_FX) && prefs.contains(Keys.COLOR_TINT_FX)) {
+            syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_FX, colorTintFx).apply()
         }
         if (!syncPrefs.contains(SyncKeys.SHOW_LIVE_PREVIEW) && prefs.contains(Keys.SHOW_LIVE_PREVIEW)) {
             syncPrefs.edit().putBoolean(SyncKeys.SHOW_LIVE_PREVIEW, showLivePreview).apply()
@@ -440,6 +512,9 @@ class UserPreferencesRepository(private val context: Context) {
         if (!syncPrefs.contains(SyncKeys.PRESS_SPARKS_ENABLED) && prefs.contains(Keys.PRESS_SPARKS_ENABLED)) {
             syncPrefs.edit().putBoolean(SyncKeys.PRESS_SPARKS_ENABLED, pressSparksEnabled).apply()
         }
+        if (!syncPrefs.contains(SyncKeys.PRESS_SPARK_STYLE) && prefs.contains(Keys.PRESS_SPARK_STYLE)) {
+            syncPrefs.edit().putString(SyncKeys.PRESS_SPARK_STYLE, pressSparkStyle.name).apply()
+        }
         if (!syncPrefs.contains(SyncKeys.GLOW_BREATHING_ENABLED) && prefs.contains(Keys.GLOW_BREATHING_ENABLED)) {
             syncPrefs.edit().putBoolean(SyncKeys.GLOW_BREATHING_ENABLED, glowBreathingEnabled).apply()
         }
@@ -471,7 +546,13 @@ class UserPreferencesRepository(private val context: Context) {
             hapticAccentEquals = hapticAccentEquals,
             buttonShapeStyle = buttonShapeStyle,
             useDynamicColor = useDynamicColor,
+            dynamicColorSource = dynamicColorSource,
+            dynamicColorVibrancy = dynamicColorVibrancy,
             customAccentArgb = customAccentArgb,
+            colorTintOperators = colorTintOperators,
+            colorTintUtilities = colorTintUtilities,
+            colorTintDigits = colorTintDigits,
+            colorTintFx = colorTintFx,
             showLivePreview = showLivePreview,
             ambientDisplayGlow = ambientDisplayGlow,
             keypadScale = keypadScale,
@@ -483,6 +564,7 @@ class UserPreferencesRepository(private val context: Context) {
             keyPressEffect = keyPressEffect,
             resultAnimStyle = resultAnimStyle,
             pressSparksEnabled = pressSparksEnabled,
+            pressSparkStyle = pressSparkStyle,
             glowBreathingEnabled = glowBreathingEnabled,
             themeAnimStyle = themeAnimStyle,
             displayGlowStyle = displayGlowStyle,
@@ -598,9 +680,39 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.USE_DYNAMIC_COLOR] = enabled }
     }
 
+    suspend fun setDynamicColorSource(source: DynamicColorSource) {
+        syncPrefs.edit().putString(SyncKeys.DYNAMIC_COLOR_SOURCE, source.name).apply()
+        context.dataStore.edit { it[Keys.DYNAMIC_COLOR_SOURCE] = source.name }
+    }
+
+    suspend fun setDynamicColorVibrancy(vibrancy: DynamicColorVibrancy) {
+        syncPrefs.edit().putString(SyncKeys.DYNAMIC_COLOR_VIBRANCY, vibrancy.name).apply()
+        context.dataStore.edit { it[Keys.DYNAMIC_COLOR_VIBRANCY] = vibrancy.name }
+    }
+
     suspend fun setCustomAccentArgb(argb: Long) {
         syncPrefs.edit().putLong(SyncKeys.CUSTOM_ACCENT_ARGB, argb).apply()
         context.dataStore.edit { it[Keys.CUSTOM_ACCENT_ARGB] = argb }
+    }
+
+    suspend fun setColorTintOperators(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_OPERATORS, enabled).apply()
+        context.dataStore.edit { it[Keys.COLOR_TINT_OPERATORS] = enabled }
+    }
+
+    suspend fun setColorTintUtilities(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_UTILITIES, enabled).apply()
+        context.dataStore.edit { it[Keys.COLOR_TINT_UTILITIES] = enabled }
+    }
+
+    suspend fun setColorTintDigits(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_DIGITS, enabled).apply()
+        context.dataStore.edit { it[Keys.COLOR_TINT_DIGITS] = enabled }
+    }
+
+    suspend fun setColorTintFx(enabled: Boolean) {
+        syncPrefs.edit().putBoolean(SyncKeys.COLOR_TINT_FX, enabled).apply()
+        context.dataStore.edit { it[Keys.COLOR_TINT_FX] = enabled }
     }
 
     suspend fun setShowLivePreview(enabled: Boolean) {
@@ -661,6 +773,11 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.PRESS_SPARKS_ENABLED] = enabled }
     }
 
+    suspend fun setPressSparkStyle(style: PressSparkStyle) {
+        syncPrefs.edit().putString(SyncKeys.PRESS_SPARK_STYLE, style.name).apply()
+        context.dataStore.edit { it[Keys.PRESS_SPARK_STYLE] = style.name }
+    }
+
     suspend fun setGlowBreathingEnabled(enabled: Boolean) {
         syncPrefs.edit().putBoolean(SyncKeys.GLOW_BREATHING_ENABLED, enabled).apply()
         context.dataStore.edit { it[Keys.GLOW_BREATHING_ENABLED] = enabled }
@@ -691,13 +808,19 @@ class UserPreferencesRepository(private val context: Context) {
         syncPrefs.edit()
             .putFloat(SyncKeys.SOUND_VOLUME, DEFAULT_SOUND_VOLUME)
             .putString(SyncKeys.HAPTIC_INTENSITY, HapticIntensity.MEDIUM.name)
-            .putString(SyncKeys.HAPTIC_STYLE, HapticStyle.ADAPTIVE.name)
+            .putString(SyncKeys.HAPTIC_STYLE, HapticStyle.SYSTEM.name)
             .putFloat(SyncKeys.HAPTIC_STRENGTH, DEFAULT_HAPTIC_STRENGTH)
             .putInt(SyncKeys.HAPTIC_DURATION_MS, DEFAULT_HAPTIC_DURATION_MS)
             .putBoolean(SyncKeys.HAPTIC_ACCENT_EQUALS, true)
             .putString(SyncKeys.BUTTON_SHAPE_STYLE, ButtonShapeStyle.PILL.name)
             .putBoolean(SyncKeys.USE_DYNAMIC_COLOR, true)
+            .putString(SyncKeys.DYNAMIC_COLOR_SOURCE, DynamicColorSource.PRIMARY.name)
+            .putString(SyncKeys.DYNAMIC_COLOR_VIBRANCY, DynamicColorVibrancy.BALANCED.name)
             .putLong(SyncKeys.CUSTOM_ACCENT_ARGB, DEFAULT_CUSTOM_ACCENT_ARGB)
+            .putBoolean(SyncKeys.COLOR_TINT_OPERATORS, true)
+            .putBoolean(SyncKeys.COLOR_TINT_UTILITIES, true)
+            .putBoolean(SyncKeys.COLOR_TINT_DIGITS, true)
+            .putBoolean(SyncKeys.COLOR_TINT_FX, true)
             .putBoolean(SyncKeys.SHOW_LIVE_PREVIEW, true)
             .putBoolean(SyncKeys.AMBIENT_DISPLAY_GLOW, false)
             .putFloat(SyncKeys.KEYPAD_SCALE, DEFAULT_KEYPAD_SCALE)
@@ -709,8 +832,9 @@ class UserPreferencesRepository(private val context: Context) {
             .putString(SyncKeys.KEY_PRESS_EFFECT, KeyPressEffect.SPRING.name)
             .putString(SyncKeys.RESULT_ANIM_STYLE, ResultAnimStyle.SLIDE_UP.name)
             .putBoolean(SyncKeys.PRESS_SPARKS_ENABLED, false)
+            .putString(SyncKeys.PRESS_SPARK_STYLE, PressSparkStyle.SPARKS.name)
             .putBoolean(SyncKeys.GLOW_BREATHING_ENABLED, false)
-            .putString(SyncKeys.THEME_ANIM_STYLE, ThemeAnimStyle.CIRCLE_REVEAL.name)
+            .putString(SyncKeys.THEME_ANIM_STYLE, ThemeAnimStyle.INSTANT.name)
             .putString(SyncKeys.DISPLAY_GLOW_STYLE, DisplayGlowStyle.AURORA.name)
             .putFloat(SyncKeys.DISPLAY_GLOW_INTENSITY, DEFAULT_GLOW_INTENSITY)
             .putString(SyncKeys.DISPLAY_GLOW_COLOR_PRESET, GlowColorPreset.AUTO.name)
@@ -718,13 +842,19 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit {
             it[Keys.SOUND_VOLUME] = DEFAULT_SOUND_VOLUME
             it[Keys.HAPTIC_INTENSITY] = HapticIntensity.MEDIUM.name
-            it[Keys.HAPTIC_STYLE] = HapticStyle.ADAPTIVE.name
+            it[Keys.HAPTIC_STYLE] = HapticStyle.SYSTEM.name
             it[Keys.HAPTIC_STRENGTH] = DEFAULT_HAPTIC_STRENGTH
             it[Keys.HAPTIC_DURATION_MS] = DEFAULT_HAPTIC_DURATION_MS
             it[Keys.HAPTIC_ACCENT_EQUALS] = true
             it[Keys.BUTTON_SHAPE_STYLE] = ButtonShapeStyle.PILL.name
             it[Keys.USE_DYNAMIC_COLOR] = true
+            it[Keys.DYNAMIC_COLOR_SOURCE] = DynamicColorSource.PRIMARY.name
+            it[Keys.DYNAMIC_COLOR_VIBRANCY] = DynamicColorVibrancy.BALANCED.name
             it[Keys.CUSTOM_ACCENT_ARGB] = DEFAULT_CUSTOM_ACCENT_ARGB
+            it[Keys.COLOR_TINT_OPERATORS] = true
+            it[Keys.COLOR_TINT_UTILITIES] = true
+            it[Keys.COLOR_TINT_DIGITS] = true
+            it[Keys.COLOR_TINT_FX] = true
             it[Keys.SHOW_LIVE_PREVIEW] = true
             it[Keys.AMBIENT_DISPLAY_GLOW] = false
             it[Keys.KEYPAD_SCALE] = DEFAULT_KEYPAD_SCALE
@@ -736,8 +866,9 @@ class UserPreferencesRepository(private val context: Context) {
             it[Keys.KEY_PRESS_EFFECT] = KeyPressEffect.SPRING.name
             it[Keys.RESULT_ANIM_STYLE] = ResultAnimStyle.SLIDE_UP.name
             it[Keys.PRESS_SPARKS_ENABLED] = false
+            it[Keys.PRESS_SPARK_STYLE] = PressSparkStyle.SPARKS.name
             it[Keys.GLOW_BREATHING_ENABLED] = false
-            it[Keys.THEME_ANIM_STYLE] = ThemeAnimStyle.CIRCLE_REVEAL.name
+            it[Keys.THEME_ANIM_STYLE] = ThemeAnimStyle.INSTANT.name
             it[Keys.DISPLAY_GLOW_STYLE] = DisplayGlowStyle.AURORA.name
             it[Keys.DISPLAY_GLOW_INTENSITY] = DEFAULT_GLOW_INTENSITY
             it[Keys.DISPLAY_GLOW_COLOR_PRESET] = GlowColorPreset.AUTO.name

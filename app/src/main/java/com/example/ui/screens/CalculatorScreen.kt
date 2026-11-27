@@ -110,6 +110,7 @@ import com.example.data.preferences.AngleUnit
 import com.example.data.preferences.ButtonShapeStyle
 import com.example.data.preferences.GlowTarget
 import com.example.data.preferences.KeyPressEffect
+import com.example.data.preferences.PressSparkStyle
 import com.example.data.preferences.ThemeAnimStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.CalculatorViewModel
@@ -590,8 +591,12 @@ fun CalculatorScreen(
                                                     glowTarget = state.glowTarget,
                                                     glowIntensity = state.glowIntensity,
                                                     glowColorOverride = resolvedGlowColor,
+                                                    colorTintOperators = state.colorTintOperators,
+                                                    colorTintUtilities = state.colorTintUtilities,
+                                                    colorTintFx = state.colorTintFx,
                                                     keyPressEffect = state.keyPressEffect,
                                                     pressSparksEnabled = state.pressSparksEnabled,
+                                                    pressSparkStyle = state.pressSparkStyle,
                                                     modifier = Modifier
                                                         .fillMaxSize()
                                                         .graphicsLayer {
@@ -612,8 +617,12 @@ fun CalculatorScreen(
                                             glowTarget = state.glowTarget,
                                             glowIntensity = state.glowIntensity,
                                             glowColorOverride = resolvedGlowColor,
+                                            colorTintDigits = state.colorTintDigits,
+                                            colorTintOperators = state.colorTintOperators,
+                                            colorTintUtilities = state.colorTintUtilities,
                                             keyPressEffect = state.keyPressEffect,
                                             pressSparksEnabled = state.pressSparksEnabled,
+                                            pressSparkStyle = state.pressSparkStyle,
                                             glowBreathingEnabled = state.glowBreathingEnabled,
                                             modifier = Modifier
                                                 .weight(1f)
@@ -701,8 +710,12 @@ fun CalculatorScreen(
                                             glowTarget = state.glowTarget,
                                             glowIntensity = state.glowIntensity,
                                             glowColorOverride = resolvedGlowColor,
+                                            colorTintOperators = state.colorTintOperators,
+                                            colorTintUtilities = state.colorTintUtilities,
+                                            colorTintFx = state.colorTintFx,
                                             keyPressEffect = state.keyPressEffect,
                                             pressSparksEnabled = state.pressSparksEnabled,
+                                            pressSparkStyle = state.pressSparkStyle,
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
@@ -810,8 +823,12 @@ fun CalculatorScreen(
                                                 glowTarget = state.glowTarget,
                                                 glowIntensity = state.glowIntensity,
                                                 glowColorOverride = resolvedGlowColor,
+                                                colorTintDigits = state.colorTintDigits,
+                                                colorTintOperators = state.colorTintOperators,
+                                                colorTintUtilities = state.colorTintUtilities,
                                                 keyPressEffect = state.keyPressEffect,
                                                 pressSparksEnabled = state.pressSparksEnabled,
+                                                pressSparkStyle = state.pressSparkStyle,
                                                 glowBreathingEnabled = state.glowBreathingEnabled,
                                                 modifier = Modifier.fillMaxWidth()
                                             )
@@ -914,14 +931,13 @@ fun CalculatorScreen(
             SettingsBottomSheet(
                 state = state,
                 onDismiss = { viewModel.setSettingsSheetOpen(false) },
+                onSaveScrollPosition = viewModel::setSettingsScrollPosition,
+                onToggleVibrationExpanded = viewModel::setSettingsVibrationExpanded,
                 onToggleSound = viewModel::toggleSoundEnabled,
                 onChangeSoundVolume = viewModel::setSoundVolume,
                 onPreviewSoundVolume = viewModel::previewSoundVolume,
                 onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
                 onSelectHapticIntensity = { intensity -> viewModel.setHapticIntensity(intensity, view) },
-                onSelectHapticStyle = { style -> viewModel.setHapticStyle(style, view) },
-                onChangeHapticStrength = viewModel::setHapticStrength,
-                onChangeHapticDurationMs = viewModel::setHapticDurationMs,
                 onToggleHapticAccentEquals = { enabled -> viewModel.setHapticAccentEquals(enabled, view) },
                 onTestHaptic = { type -> viewModel.testHaptic(type, view) },
                 onSelectThemeMode = { mode ->
@@ -930,19 +946,22 @@ fun CalculatorScreen(
                     }
                 },
                 onToggleDynamicColor = viewModel::setUseDynamicColor,
+                onSelectDynamicColorSource = viewModel::setDynamicColorSource,
+                onSelectDynamicColorVibrancy = viewModel::setDynamicColorVibrancy,
+                onToggleColorTintOperators = viewModel::setColorTintOperators,
+                onToggleColorTintUtilities = viewModel::setColorTintUtilities,
+                onToggleColorTintDigits = viewModel::setColorTintDigits,
+                onToggleColorTintFx = viewModel::setColorTintFx,
                 onSelectCustomAccentArgb = viewModel::setCustomAccentArgb,
                 onSelectButtonShape = viewModel::setButtonShapeStyle,
                 onChangeKeypadScale = viewModel::setKeypadScale,
                 onChangeFxScale = viewModel::setFxScale,
-                onToggleFxUnified = viewModel::setFxUnifiedWithKeypad,
                 onSelectGlowTarget = viewModel::setGlowTarget,
                 onChangeGlowIntensity = viewModel::setGlowIntensity,
-                onSelectGlowColorPreset = viewModel::setGlowColorPreset,
-                onSelectKeyPressEffect = viewModel::setKeyPressEffect,
                 onSelectResultAnimStyle = viewModel::setResultAnimStyle,
                 onTogglePressSparks = viewModel::setPressSparksEnabled,
+                onSelectPressSparkStyle = viewModel::setPressSparkStyle,
                 onToggleGlowBreathing = viewModel::setGlowBreathingEnabled,
-                onSelectThemeAnimStyle = viewModel::setThemeAnimStyle,
                 onToggleLivePreview = viewModel::setShowLivePreview,
                 onToggleAmbientDisplayGlow = viewModel::setAmbientDisplayGlow,
                 onSelectDisplayGlowStyle = viewModel::setDisplayGlowStyle,
@@ -1192,36 +1211,12 @@ private fun GlowingActionPill(
                                 0.55f to innerTintColor.copy(alpha = 0.28f),
                                 1.0f to Color.Transparent
                             )
-                            val strokePx = 1.dp.toPx()
-                            val strokeHalf = strokePx / 2f
-                            val cornerPx = (size.height / 2f).coerceAtLeast(0f)
-                            val rimBrush = Brush.verticalGradient(
-                                0.0f to innerTintColor,
-                                1.0f to softGlowColor.copy(alpha = 0.34f)
-                            )
-                            val rimSize = Size(
-                                (size.width - strokePx).coerceAtLeast(0f),
-                                (size.height - strokePx).coerceAtLeast(0f)
-                            )
-                            val rimCorner = CornerRadius(
-                                (cornerPx - strokeHalf).coerceAtLeast(0f),
-                                (cornerPx - strokeHalf).coerceAtLeast(0f)
-                            )
-                            val rimStroke = Stroke(width = strokePx)
 
                             onDrawBehind {
                                 val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
                                 drawRect(
                                     brush = sheenBrush,
                                     alpha = ((0.14f * clampedIntensity) + pulse * 0.12f * clampedIntensity).coerceIn(0f, 0.72f)
-                                )
-                                drawRoundRect(
-                                    brush = rimBrush,
-                                    alpha = ((0.36f * clampedIntensity) + pulse * 0.22f * clampedIntensity).coerceIn(0f, 0.90f),
-                                    topLeft = Offset(strokeHalf, strokeHalf),
-                                    size = rimSize,
-                                    cornerRadius = rimCorner,
-                                    style = rimStroke
                                 )
                             }
                         }
@@ -1269,8 +1264,12 @@ private fun FxScientificPanel(
     glowTarget: GlowTarget = GlowTarget.ACCENT_KEYS,
     glowIntensity: Float = 1f,
     glowColorOverride: Color? = null,
+    colorTintOperators: Boolean = true,
+    colorTintUtilities: Boolean = true,
+    colorTintFx: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
+    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
     modifier: Modifier = Modifier
 ) {
     val restingCorner = when (buttonShapeStyle) {
@@ -1284,26 +1283,63 @@ private fun FxScientificPanel(
         ButtonShapeStyle.SHARP -> 4.dp
     }
 
-    val modeBg = MaterialTheme.colorScheme.secondaryContainer
-    val modePressedBg = MaterialTheme.colorScheme.secondary
-    val modeFg = MaterialTheme.colorScheme.onSecondaryContainer
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    val invActiveBg = MaterialTheme.colorScheme.tertiaryContainer
-    val invActiveFg = MaterialTheme.colorScheme.onTertiaryContainer
+    val modeBg = if (colorTintOperators || colorTintFx) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val modePressedBg = if (colorTintOperators || colorTintFx) {
+        MaterialTheme.colorScheme.secondary
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val modeFg = if (colorTintOperators || colorTintFx) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
-    val normalBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val invActiveBg = if (colorTintUtilities || colorTintFx) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.primaryContainer
+    }
+    val invActiveFg = if (colorTintUtilities || colorTintFx) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
+    val normalBg = if (colorTintFx) {
+        lerp(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.primaryContainer,
+            if (isDarkTheme) 0.30f else 0.36f
+        )
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
     val normalFg = MaterialTheme.colorScheme.onSurface
-    val pressedBg = MaterialTheme.colorScheme.surfaceContainerHighest
+    val pressedBg = if (colorTintFx) {
+        lerp(
+            MaterialTheme.colorScheme.surfaceContainerHighest,
+            MaterialTheme.colorScheme.primaryContainer,
+            if (isDarkTheme) 0.45f else 0.52f
+        )
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
 
     val activeFuncBg = if (isInverse) invActiveBg else normalBg
     val activeFuncFg = if (isInverse) invActiveFg else normalFg
 
-    val fxKeyRimColor = if (glowTarget == GlowTarget.ALL_KEYS) {
-        (glowColorOverride ?: MaterialTheme.colorScheme.primary)
-            .copy(alpha = (0.26f * glowIntensity.coerceIn(0.25f, 1.75f)).coerceIn(0.08f, 0.58f))
-    } else {
-        null
-    }
+    val fxAccentGlow = glowTarget != GlowTarget.OFF
+    val fxAllGlow = glowTarget == GlowTarget.ALL_KEYS
+    val fxInvGlow = glowTarget == GlowTarget.ALL_KEYS || (glowTarget == GlowTarget.ACCENT_KEYS && isInverse)
+
+    val fxKeyRimColor: Color? = null
 
     val labelStyle = MaterialTheme.typography.labelLarge.copy(
         fontFamily = PlusJakartaSansFontFamily,
@@ -1324,23 +1360,7 @@ private fun FxScientificPanel(
     Layout(
         modifier = modifier.testTag("fx_scientific_panel"),
         content = {
-            // 0..4: INV, DEG/RAD, sin, cos, tan
-            ScientificCalcButton(
-                label = "INV",
-                isActive = isInverse,
-                testTag = "btn_sci_inv",
-                enabled = enabled,
-                onClick = viewModel::toggleInverseMode,
-                restingCornerRadius = restingCorner,
-                pressedCornerRadius = pressedCorner,
-                textStyle = modeStyle,
-                containerColor = if (isInverse) invActiveBg else normalBg,
-                pressedContainerColor = pressedBg,
-                contentColorOverride = if (isInverse) invActiveFg else normalFg,
-                borderColor = fxKeyRimColor,
-                keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
-            )
+            // 0..4: DEG/RAD, INV, sin, cos, tan
             ScientificCalcButton(
                 label = angleUnit.name,
                 isActive = true,
@@ -1354,8 +1374,30 @@ private fun FxScientificPanel(
                 pressedContainerColor = modePressedBg,
                 contentColorOverride = modeFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAccentGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
+            )
+            ScientificCalcButton(
+                label = "INV",
+                isActive = isInverse,
+                testTag = "btn_sci_inv",
+                enabled = enabled,
+                onClick = viewModel::toggleInverseMode,
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = modeStyle,
+                containerColor = if (isInverse) invActiveBg else normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = if (isInverse) invActiveFg else normalFg,
+                borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "sin⁻¹" else "sin",
@@ -1370,8 +1412,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "cos⁻¹" else "cos",
@@ -1386,8 +1431,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "tan⁻¹" else "tan",
@@ -1402,8 +1450,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
 
             // 5..9: π, e, xʸ, ln, log
@@ -1420,8 +1471,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = "e",
@@ -1436,8 +1490,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = "xʸ",
@@ -1452,8 +1509,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "eˣ" else "ln",
@@ -1468,8 +1528,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "10ˣ" else "log",
@@ -1484,8 +1547,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
 
             // 10..14: (, ), √, x!, ±
@@ -1502,8 +1568,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = ")",
@@ -1518,8 +1587,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "x²" else "√",
@@ -1534,8 +1606,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = activeFuncFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxInvGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = "x!",
@@ -1550,8 +1625,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
             ScientificCalcButton(
                 label = "±",
@@ -1566,8 +1644,11 @@ private fun FxScientificPanel(
                 pressedContainerColor = pressedBg,
                 contentColorOverride = normalFg,
                 borderColor = fxKeyRimColor,
+                hasGlow = fxAllGlow,
+                glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
-                pressSparksEnabled = pressSparksEnabled
+                pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle
             )
         }
     ) { measurables, constraints ->
@@ -1629,8 +1710,12 @@ private fun StandardKeypadGrid(
     glowTarget: GlowTarget = GlowTarget.ACCENT_KEYS,
     glowIntensity: Float = 1f,
     glowColorOverride: Color? = null,
+    colorTintDigits: Boolean = true,
+    colorTintOperators: Boolean = true,
+    colorTintUtilities: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
+    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
     glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1661,8 +1746,10 @@ private fun StandardKeypadGrid(
                 hasGlow = accentGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintUtilities,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1677,8 +1764,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1701,8 +1790,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1717,8 +1808,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1729,9 +1822,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 2: 7, 8, 9, ×
-            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "×",
                 role = CalcButtonRole.OPERATOR,
@@ -1739,8 +1832,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1751,9 +1846,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 3: 4, 5, 6, −
-            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "−",
                 role = CalcButtonRole.OPERATOR,
@@ -1761,8 +1856,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1773,9 +1870,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 4: 1, 2, 3, +
-            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
-            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "+",
                 role = CalcButtonRole.OPERATOR,
@@ -1783,8 +1880,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1795,7 +1894,7 @@ private fun StandardKeypadGrid(
             )
 
             // Row 5: 0, ., ⌫, =
-            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = ".",
                 role = CalcButtonRole.DIGIT,
@@ -1803,8 +1902,10 @@ private fun StandardKeypadGrid(
                 hasGlow = keyGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintDigits,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1819,8 +1920,10 @@ private fun StandardKeypadGrid(
                 hasGlow = accentGlow,
                 glowIntensity = glowIntensity,
                 glowColorOverride = glowColorOverride,
+                colorTintEnabled = colorTintUtilities,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1845,6 +1948,7 @@ private fun StandardKeypadGrid(
                 glowColorOverride = glowColorOverride,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
+                pressSparkStyle = pressSparkStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1917,8 +2021,10 @@ private fun DigitButton(
     hasGlow: Boolean = false,
     glowIntensity: Float = 1f,
     glowColorOverride: Color? = null,
+    colorTintEnabled: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
+    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
     glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1929,8 +2035,10 @@ private fun DigitButton(
         hasGlow = hasGlow,
         glowIntensity = glowIntensity,
         glowColorOverride = glowColorOverride,
+        colorTintEnabled = colorTintEnabled,
         keyPressEffect = keyPressEffect,
         pressSparksEnabled = pressSparksEnabled,
+        pressSparkStyle = pressSparkStyle,
         glowBreathingEnabled = glowBreathingEnabled,
         restingCornerRadius = restingCornerRadius,
         pressedCornerRadius = pressedCornerRadius,

@@ -13,11 +13,14 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
+import com.example.data.preferences.DynamicColorSource
+import com.example.data.preferences.DynamicColorVibrancy
 
 enum class ThemeMode {
     DARK,
@@ -94,22 +97,37 @@ private val ExpressiveLightColorScheme = lightColorScheme(
 fun ExpressiveCalcTheme(
     themeMode: ThemeMode = ThemeMode.DARK,
     dynamicColor: Boolean = true,
+    dynamicColorSource: DynamicColorSource = DynamicColorSource.PRIMARY,
+    dynamicColorVibrancy: DynamicColorVibrancy = DynamicColorVibrancy.BALANCED,
     customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
     content: @Composable () -> Unit
 ) {
     val darkTheme = themeMode == ThemeMode.DARK
 
     val context = LocalContext.current
-    val targetColorScheme = remember(darkTheme, dynamicColor, customAccentArgb, context) {
+    val targetColorScheme = remember(
+        darkTheme,
+        dynamicColor,
+        dynamicColorSource,
+        dynamicColorVibrancy,
+        customAccentArgb,
+        context
+    ) {
         when {
             dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                if (darkTheme) {
+                val rawDynamic = if (darkTheme) {
                     dynamicDarkColorScheme(context)
                 } else {
                     softenDynamicLightScheme(dynamicLightColorScheme(context))
                 }
+                applyDynamicColorTuning(
+                    base = rawDynamic,
+                    darkTheme = darkTheme,
+                    source = dynamicColorSource,
+                    vibrancy = dynamicColorVibrancy
+                )
             }
-            !dynamicColor && customAccentArgb != DEFAULT_CUSTOM_ACCENT_ARGB -> {
+            !dynamicColor -> {
                 buildCustomColorScheme(
                     seedColor = Color(customAccentArgb.toInt()),
                     darkTheme = darkTheme
@@ -149,76 +167,191 @@ private fun hsvColor(hue: Float, sat: Float, value: Float): Color {
     )
 }
 
+private fun contrastTextFor(bg: Color): Color {
+    return if (bg.luminance() > 0.48f) Color(0xFF14161D) else Color.White
+}
+
+private fun boostChroma(color: Color, satDelta: Float, valDelta: Float = 0f): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+    val newSat = (hsv[1] + satDelta).coerceIn(0.05f, 0.94f)
+    val newVal = (hsv[2] + valDelta).coerceIn(0.10f, 0.98f)
+    return Color(android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], newSat, newVal)))
+}
+
+private fun applyDynamicColorTuning(
+    base: ColorScheme,
+    darkTheme: Boolean,
+    source: DynamicColorSource,
+    vibrancy: DynamicColorVibrancy
+): ColorScheme {
+    val sourced = when (source) {
+        DynamicColorSource.PRIMARY -> base
+        DynamicColorSource.SECONDARY -> base.copy(
+            primary = base.secondary,
+            onPrimary = base.onSecondary,
+            primaryContainer = base.secondaryContainer,
+            onPrimaryContainer = base.onSecondaryContainer,
+            secondary = base.tertiary,
+            onSecondary = base.onTertiary,
+            secondaryContainer = base.tertiaryContainer,
+            onSecondaryContainer = base.onTertiaryContainer,
+            tertiary = base.primary,
+            onTertiary = base.onPrimary,
+            tertiaryContainer = base.primaryContainer,
+            onTertiaryContainer = base.onPrimaryContainer
+        )
+        DynamicColorSource.TERTIARY -> base.copy(
+            primary = base.tertiary,
+            onPrimary = base.onTertiary,
+            primaryContainer = base.tertiaryContainer,
+            onPrimaryContainer = base.onTertiaryContainer,
+            secondary = base.primary,
+            onSecondary = base.onPrimary,
+            secondaryContainer = base.primaryContainer,
+            onSecondaryContainer = base.onPrimaryContainer,
+            tertiary = base.secondary,
+            onTertiary = base.onSecondary,
+            tertiaryContainer = base.secondaryContainer,
+            onTertiaryContainer = base.onSecondaryContainer
+        )
+    }
+
+    return when (vibrancy) {
+        DynamicColorVibrancy.NATURAL -> sourced
+        DynamicColorVibrancy.BALANCED -> {
+            val secContainer = lerp(sourced.secondaryContainer, sourced.primaryContainer, 0.28f)
+            val tertContainer = lerp(sourced.tertiaryContainer, sourced.primaryContainer, 0.16f)
+            sourced.copy(
+                secondaryContainer = secContainer,
+                onSecondaryContainer = contrastTextFor(secContainer),
+                tertiaryContainer = tertContainer,
+                onTertiaryContainer = contrastTextFor(tertContainer),
+                surfaceContainerHigh = lerp(
+                    sourced.surfaceContainerHigh,
+                    sourced.primaryContainer,
+                    if (darkTheme) 0.10f else 0.12f
+                )
+            )
+        }
+        DynamicColorVibrancy.VIVID -> {
+            val vividPrimary = boostChroma(sourced.primary, if (darkTheme) 0.16f else 0.14f)
+            val vividPrimaryContainer = boostChroma(sourced.primaryContainer, 0.20f)
+            val vividSecContainer = boostChroma(
+                lerp(sourced.secondaryContainer, sourced.primaryContainer, 0.42f),
+                0.22f
+            )
+            val vividTertContainer = boostChroma(
+                lerp(sourced.tertiaryContainer, sourced.primaryContainer, 0.25f),
+                0.18f
+            )
+            sourced.copy(
+                primary = vividPrimary,
+                onPrimary = contrastTextFor(vividPrimary),
+                primaryContainer = vividPrimaryContainer,
+                onPrimaryContainer = contrastTextFor(vividPrimaryContainer),
+                secondaryContainer = vividSecContainer,
+                onSecondaryContainer = contrastTextFor(vividSecContainer),
+                tertiaryContainer = vividTertContainer,
+                onTertiaryContainer = contrastTextFor(vividTertContainer),
+                surfaceContainerLow = lerp(sourced.surfaceContainerLow, vividPrimaryContainer, 0.10f),
+                surfaceContainer = lerp(sourced.surfaceContainer, vividPrimaryContainer, 0.12f),
+                surfaceContainerHigh = lerp(
+                    sourced.surfaceContainerHigh,
+                    vividPrimaryContainer,
+                    if (darkTheme) 0.18f else 0.20f
+                ),
+                surfaceContainerHighest = lerp(sourced.surfaceContainerHighest, vividPrimaryContainer, 0.20f)
+            )
+        }
+    }
+}
+
 fun buildCustomColorScheme(seedColor: Color, darkTheme: Boolean): ColorScheme {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(seedColor.toArgb(), hsv)
     val primaryHue = hsv[0]
-    val sat = hsv[1].coerceIn(0.26f, 0.92f)
-    val secondaryHue = (primaryHue + 22f) % 360f
-    val tertiaryHue = (primaryHue + 62f) % 360f
+    val sat = hsv[1].coerceIn(0.32f, 0.94f)
+    // Harmonious analogous shifts so AC/backspace & operators stay cohesive with the chosen accent
+    val secondaryHue = (primaryHue + 12f) % 360f
+    val tertiaryHue = (primaryHue - 18f + 360f) % 360f
 
     return if (darkTheme) {
+        val primary = hsvColor(primaryHue, (sat * 0.54f).coerceIn(0.28f, 0.62f), 0.94f)
+        val primaryContainer = hsvColor(primaryHue, (sat * 0.80f).coerceIn(0.45f, 0.86f), 0.48f)
+        val secondary = hsvColor(secondaryHue, (sat * 0.44f).coerceIn(0.24f, 0.52f), 0.88f)
+        val secondaryContainer = hsvColor(secondaryHue, (sat * 0.56f).coerceIn(0.30f, 0.64f), 0.36f)
+        val tertiary = hsvColor(tertiaryHue, (sat * 0.50f).coerceIn(0.28f, 0.58f), 0.92f)
+        val tertiaryContainer = hsvColor(tertiaryHue, (sat * 0.68f).coerceIn(0.38f, 0.72f), 0.44f)
+
         darkColorScheme(
-            primary = hsvColor(primaryHue, (sat * 0.46f).coerceIn(0.24f, 0.50f), 0.96f),
-            onPrimary = hsvColor(primaryHue, (sat * 0.85f).coerceAtLeast(0.55f), 0.24f),
-            primaryContainer = hsvColor(primaryHue, (sat * 0.78f).coerceAtLeast(0.45f), 0.48f),
-            onPrimaryContainer = hsvColor(primaryHue, 0.20f, 0.98f),
-            secondary = hsvColor(secondaryHue, (sat * 0.34f).coerceIn(0.18f, 0.38f), 0.88f),
-            onSecondary = hsvColor(secondaryHue, 0.52f, 0.22f),
-            secondaryContainer = hsvColor(secondaryHue, (sat * 0.44f).coerceIn(0.24f, 0.48f), 0.36f),
-            onSecondaryContainer = hsvColor(secondaryHue, 0.18f, 0.94f),
-            tertiary = hsvColor(tertiaryHue, (sat * 0.44f).coerceIn(0.25f, 0.50f), 0.95f),
-            onTertiary = hsvColor(tertiaryHue, 0.65f, 0.24f),
-            tertiaryContainer = hsvColor(tertiaryHue, (sat * 0.62f).coerceIn(0.36f, 0.65f), 0.44f),
-            onTertiaryContainer = hsvColor(tertiaryHue, 0.20f, 0.96f),
-            background = hsvColor(primaryHue, 0.14f, 0.085f),
-            onBackground = Color(0xFFE6E4EC),
-            surface = hsvColor(primaryHue, 0.14f, 0.085f),
-            onSurface = Color(0xFFE6E4EC),
-            surfaceVariant = hsvColor(primaryHue, 0.16f, 0.30f),
-            onSurfaceVariant = Color(0xFFC5C6D0),
-            outline = hsvColor(primaryHue, 0.12f, 0.58f),
-            outlineVariant = hsvColor(primaryHue, 0.16f, 0.30f),
-            surfaceContainerLowest = hsvColor(primaryHue, 0.16f, 0.06f),
-            surfaceContainerLow = hsvColor(primaryHue, 0.14f, 0.12f),
-            surfaceContainer = hsvColor(primaryHue, 0.14f, 0.15f),
-            surfaceContainerHigh = hsvColor(primaryHue, 0.14f, 0.19f),
-            surfaceContainerHighest = hsvColor(primaryHue, 0.15f, 0.24f),
+            primary = primary,
+            onPrimary = contrastTextFor(primary),
+            primaryContainer = primaryContainer,
+            onPrimaryContainer = contrastTextFor(primaryContainer),
+            secondary = secondary,
+            onSecondary = contrastTextFor(secondary),
+            secondaryContainer = secondaryContainer,
+            onSecondaryContainer = contrastTextFor(secondaryContainer),
+            tertiary = tertiary,
+            onTertiary = contrastTextFor(tertiary),
+            tertiaryContainer = tertiaryContainer,
+            onTertiaryContainer = contrastTextFor(tertiaryContainer),
+            background = hsvColor(primaryHue, (sat * 0.22f).coerceIn(0.14f, 0.24f), 0.085f),
+            onBackground = Color(0xFFEAE8F0),
+            surface = hsvColor(primaryHue, (sat * 0.22f).coerceIn(0.14f, 0.24f), 0.085f),
+            onSurface = Color(0xFFEAE8F0),
+            surfaceVariant = hsvColor(primaryHue, (sat * 0.26f).coerceIn(0.16f, 0.30f), 0.30f),
+            onSurfaceVariant = Color(0xFFCACBD6),
+            outline = hsvColor(primaryHue, (sat * 0.18f).coerceIn(0.12f, 0.22f), 0.58f),
+            outlineVariant = hsvColor(primaryHue, (sat * 0.24f).coerceIn(0.16f, 0.28f), 0.30f),
+            surfaceContainerLowest = hsvColor(primaryHue, (sat * 0.24f).coerceIn(0.15f, 0.26f), 0.06f),
+            surfaceContainerLow = hsvColor(primaryHue, (sat * 0.24f).coerceIn(0.16f, 0.28f), 0.125f),
+            surfaceContainer = hsvColor(primaryHue, (sat * 0.26f).coerceIn(0.18f, 0.30f), 0.16f),
+            surfaceContainerHigh = hsvColor(primaryHue, (sat * 0.30f).coerceIn(0.20f, 0.34f), 0.20f),
+            surfaceContainerHighest = hsvColor(primaryHue, (sat * 0.34f).coerceIn(0.22f, 0.38f), 0.25f),
             error = ExpressiveErrorDark,
             onError = ExpressiveOnErrorDark,
             errorContainer = ExpressiveErrorContainerDark,
             onErrorContainer = ExpressiveOnErrorContainerDark
         )
     } else {
-        val isBrightHue = primaryHue in 42f..178f
-        val primaryVal = if (isBrightHue) 0.48f else 0.64f
-        val tertiaryVal = if (tertiaryHue in 42f..178f) 0.46f else 0.54f
+        val isBrightHue = primaryHue in 42f..182f
+        val primaryVal = if (isBrightHue) 0.46f else 0.60f
+        val tertiaryVal = if (tertiaryHue in 42f..182f) 0.46f else 0.54f
+        val primary = hsvColor(primaryHue, (sat * 0.86f).coerceIn(0.48f, 0.92f), primaryVal)
+        val primaryContainer = hsvColor(primaryHue, (sat * 0.30f).coerceIn(0.18f, 0.38f), 0.94f)
+        val secondary = hsvColor(secondaryHue, (sat * 0.58f).coerceIn(0.32f, 0.66f), 0.46f)
+        val secondaryContainer = hsvColor(secondaryHue, (sat * 0.30f).coerceIn(0.18f, 0.36f), 0.90f)
+        val tertiary = hsvColor(tertiaryHue, (sat * 0.66f).coerceIn(0.38f, 0.74f), tertiaryVal)
+        val tertiaryContainer = hsvColor(tertiaryHue, (sat * 0.32f).coerceIn(0.20f, 0.40f), 0.92f)
+
         lightColorScheme(
-            primary = hsvColor(primaryHue, (sat * 0.85f).coerceIn(0.48f, 0.92f), primaryVal),
-            onPrimary = Color.White,
-            primaryContainer = hsvColor(primaryHue, (sat * 0.24f).coerceIn(0.14f, 0.30f), 0.96f),
-            onPrimaryContainer = hsvColor(primaryHue, 0.88f, 0.24f),
-            secondary = hsvColor(secondaryHue, (sat * 0.48f).coerceIn(0.24f, 0.55f), 0.46f),
-            onSecondary = Color.White,
-            secondaryContainer = hsvColor(secondaryHue, (sat * 0.24f).coerceIn(0.14f, 0.28f), 0.93f),
-            onSecondaryContainer = hsvColor(secondaryHue, 0.65f, 0.22f),
-            tertiary = hsvColor(tertiaryHue, (sat * 0.62f).coerceIn(0.34f, 0.72f), tertiaryVal),
-            onTertiary = Color.White,
-            tertiaryContainer = hsvColor(tertiaryHue, (sat * 0.24f).coerceIn(0.16f, 0.30f), 0.95f),
-            onTertiaryContainer = hsvColor(tertiaryHue, 0.72f, 0.24f),
-            background = hsvColor(primaryHue, 0.08f, 0.93f),
+            primary = primary,
+            onPrimary = contrastTextFor(primary),
+            primaryContainer = primaryContainer,
+            onPrimaryContainer = contrastTextFor(primaryContainer),
+            secondary = secondary,
+            onSecondary = contrastTextFor(secondary),
+            secondaryContainer = secondaryContainer,
+            onSecondaryContainer = contrastTextFor(secondaryContainer),
+            tertiary = tertiary,
+            onTertiary = contrastTextFor(tertiary),
+            tertiaryContainer = tertiaryContainer,
+            onTertiaryContainer = contrastTextFor(tertiaryContainer),
+            background = hsvColor(primaryHue, (sat * 0.14f).coerceIn(0.08f, 0.16f), 0.935f),
             onBackground = Color(0xFF1A1B22),
-            surface = hsvColor(primaryHue, 0.08f, 0.93f),
+            surface = hsvColor(primaryHue, (sat * 0.14f).coerceIn(0.08f, 0.16f), 0.935f),
             onSurface = Color(0xFF1A1B22),
-            surfaceVariant = hsvColor(primaryHue, 0.13f, 0.86f),
-            onSurfaceVariant = Color(0xFF44454F),
-            outline = hsvColor(primaryHue, 0.12f, 0.48f),
-            outlineVariant = hsvColor(primaryHue, 0.14f, 0.76f),
-            surfaceContainerLowest = hsvColor(primaryHue, 0.05f, 0.97f),
-            surfaceContainerLow = hsvColor(primaryHue, 0.09f, 0.90f),
-            surfaceContainer = hsvColor(primaryHue, 0.10f, 0.88f),
-            surfaceContainerHigh = hsvColor(primaryHue, 0.11f, 0.85f),
-            surfaceContainerHighest = hsvColor(primaryHue, 0.12f, 0.82f),
+            surfaceVariant = hsvColor(primaryHue, (sat * 0.20f).coerceIn(0.13f, 0.24f), 0.86f),
+            onSurfaceVariant = Color(0xFF42434E),
+            outline = hsvColor(primaryHue, (sat * 0.16f).coerceIn(0.12f, 0.20f), 0.48f),
+            outlineVariant = hsvColor(primaryHue, (sat * 0.20f).coerceIn(0.14f, 0.24f), 0.76f),
+            surfaceContainerLowest = hsvColor(primaryHue, (sat * 0.10f).coerceIn(0.06f, 0.12f), 0.97f),
+            surfaceContainerLow = hsvColor(primaryHue, (sat * 0.16f).coerceIn(0.10f, 0.18f), 0.905f),
+            surfaceContainer = hsvColor(primaryHue, (sat * 0.18f).coerceIn(0.12f, 0.22f), 0.88f),
+            surfaceContainerHigh = hsvColor(primaryHue, (sat * 0.22f).coerceIn(0.14f, 0.26f), 0.85f),
+            surfaceContainerHighest = hsvColor(primaryHue, (sat * 0.24f).coerceIn(0.16f, 0.28f), 0.82f),
             error = ExpressiveErrorLight,
             onError = ExpressiveOnErrorLight,
             errorContainer = ExpressiveErrorContainerLight,

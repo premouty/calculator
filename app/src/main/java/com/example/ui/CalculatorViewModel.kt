@@ -20,9 +20,12 @@ import com.example.data.preferences.DEFAULT_GLOW_INTENSITY
 import com.example.data.preferences.DEFAULT_KEYPAD_SCALE
 import com.example.data.preferences.DEFAULT_SOUND_VOLUME
 import com.example.data.preferences.DisplayGlowStyle
+import com.example.data.preferences.DynamicColorSource
+import com.example.data.preferences.DynamicColorVibrancy
 import com.example.data.preferences.GlowColorPreset
 import com.example.data.preferences.GlowTarget
 import com.example.data.preferences.KeyPressEffect
+import com.example.data.preferences.PressSparkStyle
 import com.example.data.preferences.ResultAnimStyle
 import com.example.data.preferences.ThemeAnimStyle
 import com.example.data.preferences.UserPreferencesRepository
@@ -70,13 +73,19 @@ data class CalculatorUiState(
     val isFeedbackPermissionGranted: Boolean = false,
     val soundVolume: Float = DEFAULT_SOUND_VOLUME,
     val hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
-    val hapticStyle: HapticStyle = HapticStyle.ADAPTIVE,
+    val hapticStyle: HapticStyle = HapticStyle.SYSTEM,
     val hapticStrength: Float = DEFAULT_HAPTIC_STRENGTH,
     val hapticDurationMs: Int = DEFAULT_HAPTIC_DURATION_MS,
     val hapticAccentEquals: Boolean = true,
     val buttonShapeStyle: ButtonShapeStyle = ButtonShapeStyle.PILL,
     val useDynamicColor: Boolean = true,
+    val dynamicColorSource: DynamicColorSource = DynamicColorSource.PRIMARY,
+    val dynamicColorVibrancy: DynamicColorVibrancy = DynamicColorVibrancy.BALANCED,
     val customAccentArgb: Long = DEFAULT_CUSTOM_ACCENT_ARGB,
+    val colorTintOperators: Boolean = true,
+    val colorTintUtilities: Boolean = true,
+    val colorTintDigits: Boolean = true,
+    val colorTintFx: Boolean = true,
     val showLivePreview: Boolean = true,
     val ambientDisplayGlow: Boolean = false,
     val keypadScale: Float = DEFAULT_KEYPAD_SCALE,
@@ -88,8 +97,9 @@ data class CalculatorUiState(
     val keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     val resultAnimStyle: ResultAnimStyle = ResultAnimStyle.SLIDE_UP,
     val pressSparksEnabled: Boolean = false,
+    val pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
     val glowBreathingEnabled: Boolean = false,
-    val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.CIRCLE_REVEAL,
+    val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.INSTANT,
     val displayGlowStyle: DisplayGlowStyle = DisplayGlowStyle.AURORA,
     val displayGlowIntensity: Float = DEFAULT_GLOW_INTENSITY,
     val displayGlowColorPreset: GlowColorPreset = GlowColorPreset.AUTO,
@@ -98,6 +108,8 @@ data class CalculatorUiState(
     val isFullHistorySheetOpen: Boolean = false,
     val isVoiceInputDialogOpen: Boolean = false,
     val isSettingsSheetOpen: Boolean = false,
+    val settingsScrollPosition: Int = 0,
+    val settingsVibrationExpanded: Boolean = false,
     val bigNumberViewerRecord: Pair<String, String>? = null, // title/expression to full plain digits
     val history: List<CalculationRecord> = emptyList()
 )
@@ -126,7 +138,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var hasUserModifiedHapticAccentEquals = false
     private var hasUserModifiedButtonShape = false
     private var hasUserModifiedDynamicColor = false
+    private var hasUserModifiedDynamicColorSource = false
+    private var hasUserModifiedDynamicColorVibrancy = false
     private var hasUserModifiedCustomAccent = false
+    private var hasUserModifiedColorTintOperators = false
+    private var hasUserModifiedColorTintUtilities = false
+    private var hasUserModifiedColorTintDigits = false
+    private var hasUserModifiedColorTintFx = false
     private var hasUserModifiedLivePreview = false
     private var hasUserModifiedAmbientGlow = false
     private var hasUserModifiedKeypadScale = false
@@ -138,6 +156,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var hasUserModifiedKeyPressEffect = false
     private var hasUserModifiedResultAnimStyle = false
     private var hasUserModifiedPressSparks = false
+    private var hasUserModifiedPressSparkStyle = false
     private var hasUserModifiedGlowBreathing = false
     private var hasUserModifiedThemeAnimStyle = false
     private var hasUserModifiedDisplayGlowStyle = false
@@ -160,7 +179,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             hapticAccentEquals = initialPrefs.hapticAccentEquals,
             buttonShapeStyle = initialPrefs.buttonShapeStyle,
             useDynamicColor = initialPrefs.useDynamicColor,
+            dynamicColorSource = initialPrefs.dynamicColorSource,
+            dynamicColorVibrancy = initialPrefs.dynamicColorVibrancy,
             customAccentArgb = initialPrefs.customAccentArgb,
+            colorTintOperators = initialPrefs.colorTintOperators,
+            colorTintUtilities = initialPrefs.colorTintUtilities,
+            colorTintDigits = initialPrefs.colorTintDigits,
+            colorTintFx = initialPrefs.colorTintFx,
             showLivePreview = initialPrefs.showLivePreview,
             ambientDisplayGlow = initialPrefs.ambientDisplayGlow,
             keypadScale = initialPrefs.keypadScale,
@@ -172,6 +197,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = initialPrefs.keyPressEffect,
             resultAnimStyle = initialPrefs.resultAnimStyle,
             pressSparksEnabled = initialPrefs.pressSparksEnabled,
+            pressSparkStyle = initialPrefs.pressSparkStyle,
             glowBreathingEnabled = initialPrefs.glowBreathingEnabled,
             themeAnimStyle = initialPrefs.themeAnimStyle,
             displayGlowStyle = initialPrefs.displayGlowStyle,
@@ -205,7 +231,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                         hapticAccentEquals = if (hasUserModifiedHapticAccentEquals) current.hapticAccentEquals else dsPrefs.hapticAccentEquals,
                         buttonShapeStyle = if (hasUserModifiedButtonShape) current.buttonShapeStyle else dsPrefs.buttonShapeStyle,
                         useDynamicColor = if (hasUserModifiedDynamicColor) current.useDynamicColor else dsPrefs.useDynamicColor,
+                        dynamicColorSource = if (hasUserModifiedDynamicColorSource) current.dynamicColorSource else dsPrefs.dynamicColorSource,
+                        dynamicColorVibrancy = if (hasUserModifiedDynamicColorVibrancy) current.dynamicColorVibrancy else dsPrefs.dynamicColorVibrancy,
                         customAccentArgb = if (hasUserModifiedCustomAccent) current.customAccentArgb else dsPrefs.customAccentArgb,
+                        colorTintOperators = if (hasUserModifiedColorTintOperators) current.colorTintOperators else dsPrefs.colorTintOperators,
+                        colorTintUtilities = if (hasUserModifiedColorTintUtilities) current.colorTintUtilities else dsPrefs.colorTintUtilities,
+                        colorTintDigits = if (hasUserModifiedColorTintDigits) current.colorTintDigits else dsPrefs.colorTintDigits,
+                        colorTintFx = if (hasUserModifiedColorTintFx) current.colorTintFx else dsPrefs.colorTintFx,
                         showLivePreview = if (hasUserModifiedLivePreview) current.showLivePreview else dsPrefs.showLivePreview,
                         ambientDisplayGlow = if (hasUserModifiedAmbientGlow) current.ambientDisplayGlow else dsPrefs.ambientDisplayGlow,
                         keypadScale = if (hasUserModifiedKeypadScale) current.keypadScale else dsPrefs.keypadScale,
@@ -217,6 +249,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                         keyPressEffect = if (hasUserModifiedKeyPressEffect) current.keyPressEffect else dsPrefs.keyPressEffect,
                         resultAnimStyle = if (hasUserModifiedResultAnimStyle) current.resultAnimStyle else dsPrefs.resultAnimStyle,
                         pressSparksEnabled = if (hasUserModifiedPressSparks) current.pressSparksEnabled else dsPrefs.pressSparksEnabled,
+                        pressSparkStyle = if (hasUserModifiedPressSparkStyle) current.pressSparkStyle else dsPrefs.pressSparkStyle,
                         glowBreathingEnabled = if (hasUserModifiedGlowBreathing) current.glowBreathingEnabled else dsPrefs.glowBreathingEnabled,
                         themeAnimStyle = if (hasUserModifiedThemeAnimStyle) current.themeAnimStyle else dsPrefs.themeAnimStyle,
                         displayGlowStyle = if (hasUserModifiedDisplayGlowStyle) current.displayGlowStyle else dsPrefs.displayGlowStyle,
@@ -249,7 +282,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             hapticAccentEquals = prefs.hapticAccentEquals,
             buttonShapeStyle = prefs.buttonShapeStyle,
             useDynamicColor = prefs.useDynamicColor,
+            dynamicColorSource = prefs.dynamicColorSource,
+            dynamicColorVibrancy = prefs.dynamicColorVibrancy,
             customAccentArgb = prefs.customAccentArgb,
+            colorTintOperators = prefs.colorTintOperators,
+            colorTintUtilities = prefs.colorTintUtilities,
+            colorTintDigits = prefs.colorTintDigits,
+            colorTintFx = prefs.colorTintFx,
             showLivePreview = prefs.showLivePreview,
             ambientDisplayGlow = prefs.ambientDisplayGlow,
             keypadScale = prefs.keypadScale,
@@ -261,6 +300,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = prefs.keyPressEffect,
             resultAnimStyle = prefs.resultAnimStyle,
             pressSparksEnabled = prefs.pressSparksEnabled,
+            pressSparkStyle = prefs.pressSparkStyle,
             glowBreathingEnabled = prefs.glowBreathingEnabled,
             themeAnimStyle = prefs.themeAnimStyle,
             displayGlowStyle = prefs.displayGlowStyle,
@@ -285,7 +325,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             hapticAccentEquals = initialPrefs.hapticAccentEquals,
             buttonShapeStyle = initialPrefs.buttonShapeStyle,
             useDynamicColor = initialPrefs.useDynamicColor,
+            dynamicColorSource = initialPrefs.dynamicColorSource,
+            dynamicColorVibrancy = initialPrefs.dynamicColorVibrancy,
             customAccentArgb = initialPrefs.customAccentArgb,
+            colorTintOperators = initialPrefs.colorTintOperators,
+            colorTintUtilities = initialPrefs.colorTintUtilities,
+            colorTintDigits = initialPrefs.colorTintDigits,
+            colorTintFx = initialPrefs.colorTintFx,
             showLivePreview = initialPrefs.showLivePreview,
             ambientDisplayGlow = initialPrefs.ambientDisplayGlow,
             keypadScale = initialPrefs.keypadScale,
@@ -297,6 +343,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = initialPrefs.keyPressEffect,
             resultAnimStyle = initialPrefs.resultAnimStyle,
             pressSparksEnabled = initialPrefs.pressSparksEnabled,
+            pressSparkStyle = initialPrefs.pressSparkStyle,
             glowBreathingEnabled = initialPrefs.glowBreathingEnabled,
             themeAnimStyle = initialPrefs.themeAnimStyle,
             displayGlowStyle = initialPrefs.displayGlowStyle,
@@ -907,11 +954,59 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun setDynamicColorSource(source: DynamicColorSource) {
+        hasUserModifiedDynamicColorSource = true
+        _optimisticPrefs.update { it.copy(dynamicColorSource = source) }
+        viewModelScope.launch {
+            prefsRepository.setDynamicColorSource(source)
+        }
+    }
+
+    fun setDynamicColorVibrancy(vibrancy: DynamicColorVibrancy) {
+        hasUserModifiedDynamicColorVibrancy = true
+        _optimisticPrefs.update { it.copy(dynamicColorVibrancy = vibrancy) }
+        viewModelScope.launch {
+            prefsRepository.setDynamicColorVibrancy(vibrancy)
+        }
+    }
+
     fun setCustomAccentArgb(argb: Long) {
         hasUserModifiedCustomAccent = true
         _optimisticPrefs.update { it.copy(customAccentArgb = argb) }
         viewModelScope.launch {
             prefsRepository.setCustomAccentArgb(argb)
+        }
+    }
+
+    fun setColorTintOperators(enabled: Boolean) {
+        hasUserModifiedColorTintOperators = true
+        _optimisticPrefs.update { it.copy(colorTintOperators = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setColorTintOperators(enabled)
+        }
+    }
+
+    fun setColorTintUtilities(enabled: Boolean) {
+        hasUserModifiedColorTintUtilities = true
+        _optimisticPrefs.update { it.copy(colorTintUtilities = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setColorTintUtilities(enabled)
+        }
+    }
+
+    fun setColorTintDigits(enabled: Boolean) {
+        hasUserModifiedColorTintDigits = true
+        _optimisticPrefs.update { it.copy(colorTintDigits = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setColorTintDigits(enabled)
+        }
+    }
+
+    fun setColorTintFx(enabled: Boolean) {
+        hasUserModifiedColorTintFx = true
+        _optimisticPrefs.update { it.copy(colorTintFx = enabled) }
+        viewModelScope.launch {
+            prefsRepository.setColorTintFx(enabled)
         }
     }
 
@@ -1006,6 +1101,14 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun setPressSparkStyle(style: PressSparkStyle) {
+        hasUserModifiedPressSparkStyle = true
+        _optimisticPrefs.update { it.copy(pressSparkStyle = style) }
+        viewModelScope.launch {
+            prefsRepository.setPressSparkStyle(style)
+        }
+    }
+
     fun setGlowBreathingEnabled(enabled: Boolean) {
         hasUserModifiedGlowBreathing = true
         _optimisticPrefs.update { it.copy(glowBreathingEnabled = enabled) }
@@ -1056,7 +1159,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         hasUserModifiedHapticAccentEquals = true
         hasUserModifiedButtonShape = true
         hasUserModifiedDynamicColor = true
+        hasUserModifiedDynamicColorSource = true
+        hasUserModifiedDynamicColorVibrancy = true
         hasUserModifiedCustomAccent = true
+        hasUserModifiedColorTintOperators = true
+        hasUserModifiedColorTintUtilities = true
+        hasUserModifiedColorTintDigits = true
+        hasUserModifiedColorTintFx = true
         hasUserModifiedLivePreview = true
         hasUserModifiedAmbientGlow = true
         hasUserModifiedKeypadScale = true
@@ -1068,6 +1177,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         hasUserModifiedKeyPressEffect = true
         hasUserModifiedResultAnimStyle = true
         hasUserModifiedPressSparks = true
+        hasUserModifiedPressSparkStyle = true
         hasUserModifiedGlowBreathing = true
         hasUserModifiedThemeAnimStyle = true
         hasUserModifiedDisplayGlowStyle = true
@@ -1077,13 +1187,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(
                 soundVolume = DEFAULT_SOUND_VOLUME,
                 hapticIntensity = HapticIntensity.MEDIUM,
-                hapticStyle = HapticStyle.ADAPTIVE,
+                hapticStyle = HapticStyle.SYSTEM,
                 hapticStrength = DEFAULT_HAPTIC_STRENGTH,
                 hapticDurationMs = DEFAULT_HAPTIC_DURATION_MS,
                 hapticAccentEquals = true,
                 buttonShapeStyle = ButtonShapeStyle.PILL,
                 useDynamicColor = true,
+                dynamicColorSource = DynamicColorSource.PRIMARY,
+                dynamicColorVibrancy = DynamicColorVibrancy.BALANCED,
                 customAccentArgb = DEFAULT_CUSTOM_ACCENT_ARGB,
+                colorTintOperators = true,
+                colorTintUtilities = true,
+                colorTintDigits = true,
+                colorTintFx = true,
                 showLivePreview = true,
                 ambientDisplayGlow = false,
                 keypadScale = DEFAULT_KEYPAD_SCALE,
@@ -1095,8 +1211,9 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 keyPressEffect = KeyPressEffect.SPRING,
                 resultAnimStyle = ResultAnimStyle.SLIDE_UP,
                 pressSparksEnabled = false,
+                pressSparkStyle = PressSparkStyle.SPARKS,
                 glowBreathingEnabled = false,
-                themeAnimStyle = ThemeAnimStyle.CIRCLE_REVEAL,
+                themeAnimStyle = ThemeAnimStyle.INSTANT,
                 displayGlowStyle = DisplayGlowStyle.AURORA,
                 displayGlowIntensity = DEFAULT_GLOW_INTENSITY,
                 displayGlowColorPreset = GlowColorPreset.AUTO
@@ -1145,6 +1262,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 isFullHistorySheetOpen = if (open) false else it.isFullHistorySheetOpen,
                 isVoiceInputDialogOpen = if (open) false else it.isVoiceInputDialogOpen
             )
+        }
+    }
+
+    fun setSettingsScrollPosition(position: Int) {
+        val clamped = position.coerceAtLeast(0)
+        if (_state.value.settingsScrollPosition != clamped) {
+            _state.update { it.copy(settingsScrollPosition = clamped) }
+        }
+    }
+
+    fun setSettingsVibrationExpanded(expanded: Boolean) {
+        if (_state.value.settingsVibrationExpanded != expanded) {
+            _state.update { it.copy(settingsVibrationExpanded = expanded) }
         }
     }
 
