@@ -67,11 +67,14 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -92,6 +95,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -104,6 +108,9 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.preferences.AngleUnit
 import com.example.data.preferences.ButtonShapeStyle
+import com.example.data.preferences.GlowTarget
+import com.example.data.preferences.KeyPressEffect
+import com.example.data.preferences.ThemeAnimStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.CalculatorViewModel
 import com.example.ui.components.BigNumberViewerDialog
@@ -156,36 +163,71 @@ fun CalculatorScreen(
     var revealOriginRoot by remember { mutableStateOf<Offset?>(null) }
     var revealJob by remember { mutableStateOf<Job?>(null) }
 
-    val revealCircleShape = remember {
+    val revealDiagPath = remember { Path() }
+    val revealShape = remember(state.themeAnimStyle) {
         object : Shape {
             override fun createOutline(
                 size: Size,
                 layoutDirection: LayoutDirection,
                 density: Density
             ): Outline {
-                val progress = revealRadiusFraction.value
-                val origin = revealOriginRoot?.let { it - rootBoxOrigin }
-                    ?: Offset(size.width * 0.16f, size.height * 0.08f)
-                val maxRadius = hypot(
-                    maxOf(origin.x, size.width - origin.x),
-                    maxOf(origin.y, size.height - origin.y)
-                ) * 1.02f
-                val r = (maxRadius * progress).coerceAtLeast(1f)
-                return Outline.Rounded(
-                    RoundRect(
-                        left = origin.x - r,
-                        top = origin.y - r,
-                        right = origin.x + r,
-                        bottom = origin.y + r,
-                        cornerRadius = CornerRadius(r, r)
-                    )
-                )
+                val progress = revealRadiusFraction.value.coerceIn(0f, 1f)
+                return when (state.themeAnimStyle) {
+                    ThemeAnimStyle.CIRCLE_REVEAL -> {
+                        val origin = revealOriginRoot?.let { it - rootBoxOrigin }
+                            ?: Offset(size.width * 0.16f, size.height * 0.08f)
+                        val maxRadius = hypot(
+                            maxOf(origin.x, size.width - origin.x),
+                            maxOf(origin.y, size.height - origin.y)
+                        ) * 1.02f
+                        val r = (maxRadius * progress).coerceAtLeast(1f)
+                        Outline.Rounded(
+                            RoundRect(
+                                left = origin.x - r,
+                                top = origin.y - r,
+                                right = origin.x + r,
+                                bottom = origin.y + r,
+                                cornerRadius = CornerRadius(r, r)
+                            )
+                        )
+                    }
+                    ThemeAnimStyle.DIAGONAL_WIPE -> {
+                        val d = (size.width + size.height) * progress
+                        revealDiagPath.reset()
+                        revealDiagPath.moveTo(0f, 0f)
+                        revealDiagPath.lineTo(minOf(d, size.width), 0f)
+                        if (d > size.width) {
+                            revealDiagPath.lineTo(size.width, minOf(d - size.width, size.height))
+                        }
+                        if (d > size.height) {
+                            revealDiagPath.lineTo(minOf(d - size.height, size.width), size.height)
+                        }
+                        revealDiagPath.lineTo(0f, minOf(d, size.height))
+                        revealDiagPath.close()
+                        Outline.Generic(revealDiagPath)
+                    }
+                    ThemeAnimStyle.VERTICAL_CURTAIN -> {
+                        val h = (size.height * progress).coerceAtLeast(1f)
+                        Outline.Rectangle(Rect(0f, 0f, size.width, h))
+                    }
+                    ThemeAnimStyle.CROSSFADE,
+                    ThemeAnimStyle.INSTANT -> {
+                        Outline.Rectangle(Rect(0f, 0f, size.width, size.height))
+                    }
+                }
             }
         }
     }
 
+    val currentThemeAnimStyle by rememberUpdatedState(state.themeAnimStyle)
     val triggerThemeReveal: (() -> Unit) -> Unit = { applyThemeChange ->
-        if (isThemeRevealing || captureOldTheme) {
+        if (currentThemeAnimStyle == ThemeAnimStyle.INSTANT) {
+            revealJob?.cancel()
+            revealJob = null
+            captureOldTheme = false
+            isThemeRevealing = false
+            applyThemeChange()
+        } else if (isThemeRevealing || captureOldTheme) {
             revealJob?.cancel()
             revealJob = null
             captureOldTheme = false
@@ -202,10 +244,16 @@ fun CalculatorScreen(
                     isThemeRevealing = true
                     captureOldTheme = false
                     applyThemeChange()
+                    val duration = when (currentThemeAnimStyle) {
+                        ThemeAnimStyle.CROSSFADE -> 300
+                        ThemeAnimStyle.VERTICAL_CURTAIN -> 340
+                        ThemeAnimStyle.DIAGONAL_WIPE -> 360
+                        else -> 360
+                    }
                     revealRadiusFraction.animateTo(
                         targetValue = 1f,
                         animationSpec = tween(
-                            durationMillis = 360,
+                            durationMillis = duration,
                             easing = CubicBezierEasing(0.22f, 0.88f, 0.26f, 1.0f)
                         )
                     )
@@ -246,8 +294,22 @@ fun CalculatorScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        clip = isThemeRevealing
-                        shape = if (isThemeRevealing) revealCircleShape else RectangleShape
+                        if (isThemeRevealing) {
+                            when (state.themeAnimStyle) {
+                                ThemeAnimStyle.CROSSFADE -> {
+                                    alpha = revealRadiusFraction.value.coerceIn(0f, 1f)
+                                }
+                                ThemeAnimStyle.CIRCLE_REVEAL,
+                                ThemeAnimStyle.DIAGONAL_WIPE,
+                                ThemeAnimStyle.VERTICAL_CURTAIN -> {
+                                    clip = true
+                                    shape = revealShape
+                                }
+                                ThemeAnimStyle.INSTANT -> Unit
+                            }
+                        } else {
+                            shape = RectangleShape
+                        }
                     }
                     .drawWithContent {
                         if (captureOldTheme) {
@@ -273,18 +335,18 @@ fun CalculatorScreen(
                         240.dp
                     }
 
-                    // Do not delegate with `by` in composition: read inside layout & graphicsLayer for zero-recompose 120Hz
+                    // Do not delegate with `by` in composition: read inside graphicsLayer for zero-recompose 120Hz
                     val scientificExpandState = animateFloatAsState(
                         targetValue = if (state.isScientificExpanded) 1f else 0f,
-                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                        animationSpec = spring(
+                            dampingRatio = 0.92f,
+                            stiffness = 680f
+                        ),
                         label = "scientific_expand_progress"
                     )
                     val isSciExpandedState = rememberUpdatedState(state.isScientificExpanded)
                     val isSciPanelVisible by remember(scientificExpandState) {
                         derivedStateOf { isSciExpandedState.value || scientificExpandState.value > 0.001f }
-                    }
-                    val keypadContentScaleState = remember(scientificExpandState) {
-                        derivedStateOf { 1f - 0.11f * scientificExpandState.value }
                     }
 
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -297,10 +359,39 @@ fun CalculatorScreen(
                             val isWideOrLandscape = maxWidth >= 600.dp || maxWidth > maxHeight
                             val isCompactVertical = maxHeight < 700.dp
 
-                            val collapsedRowHeight = if (isCompactVertical) 56.dp else 62.dp
-                            val expandedRowHeight = if (isCompactVertical) 44.dp else 48.dp
-                            val collapsedRowSpacing = if (isCompactVertical) 9.dp else 10.dp
-                            val expandedRowSpacing = if (isCompactVertical) 6.dp else 8.dp
+                            val keypadScale = state.keypadScale.coerceIn(0.80f, 1.18f)
+                            val fxScale = state.fxScale.coerceIn(0.78f, 1.25f)
+                            val keypadTextScale = (0.85f + 0.15f * keypadScale).coerceIn(0.84f, 1.12f)
+                            val fxTextScale = (0.86f + 0.14f * fxScale).coerceIn(0.84f, 1.14f)
+
+                            val resolvedGlowColor = remember(state.glowColorPreset) {
+                                state.glowColorPreset.argb?.let { Color(it) }
+                            }
+
+                            val baseStdRowHeight = if (isCompactVertical) 49.dp else 53.dp
+                            val baseStdRowSpacing = if (isCompactVertical) 6.dp else 8.dp
+                            val stdRowSpacing = (baseStdRowSpacing * (0.85f + 0.15f * keypadScale))
+                                .coerceIn(4.dp, 10.dp)
+
+                            val baseFxTrayHeight = if (isCompactVertical) 94.dp else 106.dp
+                            val desiredFxTrayHeight = baseFxTrayHeight * fxScale
+                            val fxBottomGap = if (state.fxUnifiedWithKeypad) {
+                                if (isCompactVertical) 10.dp else 12.dp
+                            } else {
+                                if (isCompactVertical) 8.dp else 10.dp
+                            }
+
+                            val maxStdBudget = (maxHeight - 235.dp - (desiredFxTrayHeight * 0.55f))
+                                .coerceAtLeast(210.dp)
+                            val maxAllowedStdRowH = ((maxStdBudget - stdRowSpacing * 4f - 14.dp) / 5f)
+                                .coerceIn(38.dp, 68.dp)
+                            val stdRowHeight = (baseStdRowHeight * keypadScale)
+                                .coerceIn(38.dp, maxAllowedStdRowH)
+
+                            val keypadTotalEstimate = stdRowHeight * 5f + stdRowSpacing * 4f + 16.dp
+                            val maxAllowedFxH = (maxHeight - keypadTotalEstimate - 220.dp)
+                                .coerceIn(72.dp, 142.dp)
+                            val fxTrayHeight = desiredFxTrayHeight.coerceIn(72.dp, maxAllowedFxH)
 
                             val standardRestingCorner = when (state.buttonShapeStyle) {
                                 ButtonShapeStyle.PILL -> 50.dp
@@ -312,21 +403,94 @@ fun CalculatorScreen(
                                 ButtonShapeStyle.SQUIRCLE -> 11.dp
                                 ButtonShapeStyle.SHARP -> 6.dp
                             }
-                            val sciRestingCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 15.dp
-                                ButtonShapeStyle.SQUIRCLE -> 13.dp
-                                ButtonShapeStyle.SHARP -> 8.dp
+
+                            val portraitColOriginRef = remember { FloatArray(2) }
+                            val portraitKeypadInnerRectRef = remember { FloatArray(4) } // left, top, right, bottom in Column coords
+                            val portraitDeckBg = MaterialTheme.colorScheme.surfaceContainerLow
+                            val portraitDeckBorder = MaterialTheme.colorScheme.outlineVariant
+
+                            val fxBottomGapPx = with(density) { fxBottomGap.toPx() }
+                            val fxTotalPx = with(density) { (fxTrayHeight + fxBottomGap).toPx() }
+                            val topPadDp = 8.dp
+                            val topPadPx = with(density) { topPadDp.toPx() }
+                            val deckPadTopPx = with(density) { 8.dp.toPx() }
+
+                            val collapsedKeypadInnerDp = stdRowHeight * 5f + stdRowSpacing * 4f
+                            val rawCompressedRowH = (stdRowHeight * 0.78f).coerceAtLeast(37.dp)
+                            val rawCompressedGap = (stdRowSpacing * 0.82f).coerceAtLeast(5.dp)
+                            val rawCompressedInnerDp = rawCompressedRowH * 5f + rawCompressedGap * 4f
+                            val rawSavedDp = (collapsedKeypadInnerDp - rawCompressedInnerDp).coerceAtLeast(0.dp)
+                            val maxAllowedSavedDp = (fxTrayHeight + fxBottomGap - topPadDp).coerceAtLeast(0.dp)
+                            val compressRatio = if (rawSavedDp > 0.dp && rawSavedDp > maxAllowedSavedDp) {
+                                (maxAllowedSavedDp / rawSavedDp).coerceIn(0f, 1f)
+                            } else {
+                                1f
                             }
-                            val sciPressedCorner = when (state.buttonShapeStyle) {
-                                ButtonShapeStyle.PILL -> 10.dp
-                                ButtonShapeStyle.SQUIRCLE -> 9.dp
-                                ButtonShapeStyle.SHARP -> 5.dp
+                            val unifiedCompressedRowH = stdRowHeight - (stdRowHeight - rawCompressedRowH) * compressRatio
+                            val unifiedCompressedGap = stdRowSpacing - (stdRowSpacing - rawCompressedGap) * compressRatio
+                            val unifiedExpandedInnerDp = unifiedCompressedRowH * 5f + unifiedCompressedGap * 4f
+                            val unifiedSavedPx = with(density) {
+                                (collapsedKeypadInnerDp - unifiedExpandedInnerDp).coerceAtLeast(0.dp).toPx()
+                            }
+                            val unifiedTargetShiftPx = if (state.fxUnifiedWithKeypad) {
+                                topPadPx + unifiedSavedPx
+                            } else {
+                                0f
                             }
 
                             Column(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .widthIn(max = 980.dp)
+                                    .onGloballyPositioned { coords ->
+                                        if (coords.isAttached) {
+                                            val pos = coords.positionInRoot()
+                                            portraitColOriginRef[0] = pos.x
+                                            portraitColOriginRef[1] = pos.y
+                                        }
+                                    }
+                                    .drawBehind {
+                                        if (!isWideOrLandscape && state.fxUnifiedWithKeypad) {
+                                            val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                            val kW = portraitKeypadInnerRectRef[2] - portraitKeypadInnerRectRef[0]
+                                            if (p > 0.01f && kW > 1f) {
+                                                val padX = 8.dp.toPx()
+                                                val padBot = 7.dp.toPx()
+                                                val kLeft = portraitKeypadInnerRectRef[0]
+                                                val kTop = portraitKeypadInnerRectRef[1]
+                                                val kBottom = portraitKeypadInnerRectRef[3]
+                                                val deckTopY = kTop + (unifiedSavedPx - fxTotalPx) * p - deckPadTopPx
+                                                val deckCorner = 24.dp.toPx()
+                                                val rectTopLeft = Offset(kLeft - padX, deckTopY)
+                                                val rectSize = Size(
+                                                    kW + padX * 2f,
+                                                    (kBottom + padBot) - deckTopY
+                                                )
+                                                drawRoundRect(
+                                                    color = portraitDeckBg.copy(alpha = 0.94f * p),
+                                                    topLeft = rectTopLeft,
+                                                    size = rectSize,
+                                                    cornerRadius = CornerRadius(deckCorner, deckCorner)
+                                                )
+                                                drawRoundRect(
+                                                    color = portraitDeckBorder.copy(alpha = 0.28f * p),
+                                                    topLeft = rectTopLeft,
+                                                    size = rectSize,
+                                                    cornerRadius = CornerRadius(deckCorner, deckCorner),
+                                                    style = Stroke(width = 1.dp.toPx())
+                                                )
+                                                val sepY = kTop + unifiedSavedPx * p - fxBottomGapPx * 0.5f
+                                                if (sepY > deckTopY + 8.dp.toPx() && sepY < kBottom) {
+                                                    drawLine(
+                                                        color = portraitDeckBorder.copy(alpha = 0.26f * p),
+                                                        start = Offset(kLeft + 6.dp.toPx(), sepY),
+                                                        end = Offset(kLeft + kW - 6.dp.toPx(), sepY),
+                                                        strokeWidth = 1.dp.toPx()
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                             ) {
                                 if (isWideOrLandscape) {
                                     CalculatorDisplay(
@@ -350,29 +514,57 @@ fun CalculatorScreen(
                                     ScientificToggleStrip(
                                         isExpanded = state.isScientificExpanded,
                                         onToggle = viewModel::toggleScientificExpanded,
-                                        onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) }
+                                        onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
+                                        glowTarget = state.glowTarget,
+                                        glowIntensity = state.glowIntensity,
+                                        glowColorOverride = resolvedGlowColor
                                     )
 
+                                    val landscapeUnifiedSurfaceColor = MaterialTheme.colorScheme.surfaceContainerLow
+                                    val landscapeUnifiedOutline = MaterialTheme.colorScheme.outlineVariant
                                     Row(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxWidth()
                                             .navigationBarsPadding()
                                             .padding(horizontal = 20.dp, vertical = 8.dp)
+                                            .drawBehind {
+                                                if (state.fxUnifiedWithKeypad) {
+                                                    val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                                    if (p > 0.01f) {
+                                                        val pad = 6.dp.toPx()
+                                                        val corner = 24.dp.toPx()
+                                                        drawRoundRect(
+                                                            color = landscapeUnifiedSurfaceColor.copy(alpha = 0.86f * p),
+                                                            topLeft = Offset(-pad, -pad),
+                                                            size = Size(size.width + pad * 2f, size.height + pad * 2f),
+                                                            cornerRadius = CornerRadius(corner, corner)
+                                                        )
+                                                        drawRoundRect(
+                                                            color = landscapeUnifiedOutline.copy(alpha = 0.24f * p),
+                                                            topLeft = Offset(-pad, -pad),
+                                                            size = Size(size.width + pad * 2f, size.height + pad * 2f),
+                                                            cornerRadius = CornerRadius(corner, corner),
+                                                            style = Stroke(width = 1.dp.toPx())
+                                                        )
+                                                    }
+                                                }
+                                            }
                                     ) {
                                         if (isSciPanelVisible) {
                                             val containerWidth = this@BoxWithConstraints.maxWidth.coerceAtMost(980.dp)
-                                            val fullSciWidth = ((containerWidth - 54.dp) * 0.45f).coerceAtLeast(180.dp)
-                                            val sciTrayShape = remember { RoundedCornerShape(24.dp) }
+                                            val sciRatio = (0.45f * (0.82f + 0.18f * fxScale)).coerceIn(0.35f, 0.54f)
+                                            val fullSciWidth = ((containerWidth - 54.dp) * sciRatio).coerceAtLeast(165.dp)
+                                            val targetGapDp = if (state.fxUnifiedWithKeypad) 6.dp else 14.dp
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxHeight()
                                                     .clipToBounds()
                                                     .layout { measurable, constraints ->
-                                                        val p = scientificExpandState.value
+                                                        val p = scientificExpandState.value.coerceIn(0f, 1f)
                                                         val targetFullPx = fullSciWidth.roundToPx()
                                                             .coerceAtMost(constraints.maxWidth)
-                                                        val gapPx = (14.dp.toPx() * p).roundToInt()
+                                                        val gapPx = (targetGapDp.toPx() * p).roundToInt()
                                                         val placeable = measurable.measure(
                                                             constraints.copy(minWidth = targetFullPx, maxWidth = targetFullPx)
                                                         )
@@ -386,151 +578,241 @@ fun CalculatorScreen(
                                                         }
                                                     }
                                             ) {
-                                                Box(
+                                                FxScientificPanel(
+                                                    isInverse = state.isInverseMode,
+                                                    angleUnit = state.angleUnit,
+                                                    buttonShapeStyle = state.buttonShapeStyle,
+                                                    viewModel = viewModel,
+                                                    enabled = state.isScientificExpanded,
+                                                    columns = 3,
+                                                    rowSpacing = (7.dp * (0.85f + 0.15f * fxScale)).coerceIn(5.dp, 10.dp),
+                                                    textScale = fxTextScale,
+                                                    glowTarget = state.glowTarget,
+                                                    glowIntensity = state.glowIntensity,
+                                                    glowColorOverride = resolvedGlowColor,
+                                                    keyPressEffect = state.keyPressEffect,
+                                                    pressSparksEnabled = state.pressSparksEnabled,
                                                     modifier = Modifier
                                                         .fillMaxSize()
                                                         .graphicsLayer {
-                                                            val p = scientificExpandState.value
+                                                            val p = scientificExpandState.value.coerceIn(0f, 1f)
                                                             translationX = -size.width * (1f - p)
                                                         }
-                                                        .background(
-                                                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                                            shape = sciTrayShape
-                                                        )
-                                                        .border(
-                                                            width = 1.dp,
-                                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-                                                            shape = sciTrayShape
-                                                        )
-                                                ) {
-                                                    ScientificKeypadGrid(
-                                                        isInverse = state.isInverseMode,
-                                                        angleUnit = state.angleUnit,
-                                                        viewModel = viewModel,
-                                                        restingCornerRadius = sciRestingCorner,
-                                                        pressedCornerRadius = sciPressedCorner,
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .padding(8.dp)
-                                                    )
-                                                }
+                                                )
                                             }
                                         }
 
                                         StandardKeypadGrid(
                                             viewModel = viewModel,
                                             rowHeight = null,
-                                            rowSpacing = 10.dp,
+                                            rowSpacing = (10.dp * (0.85f + 0.15f * keypadScale)).coerceIn(6.dp, 13.dp),
                                             restingCornerRadius = standardRestingCorner,
                                             pressedCornerRadius = standardPressedCorner,
+                                            textScale = keypadTextScale,
+                                            glowTarget = state.glowTarget,
+                                            glowIntensity = state.glowIntensity,
+                                            glowColorOverride = resolvedGlowColor,
+                                            keyPressEffect = state.keyPressEffect,
+                                            pressSparksEnabled = state.pressSparksEnabled,
+                                            glowBreathingEnabled = state.glowBreathingEnabled,
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .fillMaxHeight()
                                         )
                                     }
                                 } else {
-                                    CalculatorDisplay(
-                                        state = state,
-                                        onToggleTheme = { triggerThemeReveal { viewModel.cycleThemeMode() } },
-                                        onToggleSound = viewModel::toggleSoundEnabled,
-                                        onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
-                                        onQuickToggleFeedback = { sound, vib ->
-                                            viewModel.setFeedbackEnabled(sound, vib, view)
-                                        },
-                                        onToggleTopHistory = viewModel::toggleTopHistory,
-                                        onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
-                                        onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
-                                        onOpenSettings = { viewModel.setSettingsSheetOpen(true) },
-                                        onInspectBigNumber = viewModel::openBigNumberViewer,
-                                        compactMode = isCompactVertical,
-                                        onThemeButtonPositioned = { themeButtonAnchorRoot = it },
+                                    val displayLiftPxState = remember(
+                                        scientificExpandState,
+                                        fxTotalPx,
+                                        unifiedTargetShiftPx,
+                                        deckPadTopPx,
+                                        state.fxUnifiedWithKeypad
+                                    ) {
+                                        derivedStateOf {
+                                            val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                            if (state.fxUnifiedWithKeypad) {
+                                                ((fxTotalPx - unifiedTargetShiftPx + deckPadTopPx).coerceAtLeast(0f)) * p
+                                            } else {
+                                                fxTotalPx * p
+                                            }
+                                        }
+                                    }
+                                    val keypadContentScaleState = remember(
+                                        scientificExpandState,
+                                        stdRowHeight,
+                                        unifiedCompressedRowH,
+                                        state.fxUnifiedWithKeypad
+                                    ) {
+                                        val targetContentScale = (1f - (1f - (unifiedCompressedRowH / stdRowHeight).coerceIn(0.74f, 1f)) * 0.65f)
+                                            .coerceIn(0.84f, 1f)
+                                        derivedStateOf {
+                                            if (state.fxUnifiedWithKeypad) {
+                                                val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                                1f - (1f - targetContentScale) * p
+                                            } else {
+                                                1f
+                                            }
+                                        }
+                                    }
+                                    val fxRevealClipShape = remember(
+                                        scientificExpandState,
+                                        fxTrayHeight,
+                                        unifiedTargetShiftPx,
+                                        state.fxUnifiedWithKeypad
+                                    ) {
+                                        object : Shape {
+                                            override fun createOutline(
+                                                size: Size,
+                                                layoutDirection: LayoutDirection,
+                                                density: Density
+                                            ): Outline {
+                                                val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                                val clipBottom = (size.height - (1f - p) * (size.height * 0.14f))
+                                                    .coerceIn(0f, size.height)
+                                                val clipTop = (clipBottom - size.height * p)
+                                                    .coerceIn(0f, clipBottom)
+                                                return Outline.Rectangle(
+                                                    Rect(
+                                                        left = 0f,
+                                                        top = clipTop,
+                                                        right = size.width,
+                                                        bottom = clipBottom
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Upper region: pre-composed Fx grid behind lifted display & toggle strip -> 0 Frame-1 hitch, 0 overlap
+                                    Box(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .heightIn(min = 190.dp)
-                                            .onSizeChanged { displayCardHeightPxRef[0] = it.height }
-                                    )
-
-                                    ScientificToggleStrip(
-                                        isExpanded = state.isScientificExpanded,
-                                        onToggle = viewModel::toggleScientificExpanded,
-                                        onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) }
-                                    )
-
-                                    val sciBottomPadding = if (isCompactVertical) 7.dp else 9.dp
-                                    val sciTrayHeight = if (isCompactVertical) 114.dp else 128.dp
-
-                                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                                        Column(
+                                            .fillMaxWidth()
+                                    ) {
+                                        FxScientificPanel(
+                                            isInverse = state.isInverseMode,
+                                            angleUnit = state.angleUnit,
+                                            buttonShapeStyle = state.buttonShapeStyle,
+                                            viewModel = viewModel,
+                                            enabled = state.isScientificExpanded,
+                                            columns = 5,
+                                            rowSpacing = ((if (isCompactVertical) 6.dp else 7.5.dp) * (0.85f + 0.15f * fxScale)).coerceIn(5.dp, 10.dp),
+                                            textScale = fxTextScale,
+                                            glowTarget = state.glowTarget,
+                                            glowIntensity = state.glowIntensity,
+                                            glowColorOverride = resolvedGlowColor,
+                                            keyPressEffect = state.keyPressEffect,
+                                            pressSparksEnabled = state.pressSparksEnabled,
                                             modifier = Modifier
+                                                .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
-                                                .navigationBarsPadding()
-                                                .padding(horizontal = 18.dp, vertical = 7.dp)
-                                        ) {
-                                            if (isSciPanelVisible) {
-                                                val sciTrayShape = remember { RoundedCornerShape(24.dp) }
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clipToBounds()
-                                                        .layout { measurable, constraints ->
-                                                            val p = scientificExpandState.value
-                                                            val placeable = measurable.measure(constraints)
-                                                            val visibleH = (placeable.height * p)
-                                                                .roundToInt()
-                                                                .coerceIn(0, placeable.height)
-                                                            layout(placeable.width, visibleH) {
-                                                                if (visibleH > 0) {
-                                                                    placeable.placeRelative(0, 0)
-                                                                }
-                                                            }
-                                                        }
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .graphicsLayer {
-                                                                val p = scientificExpandState.value
-                                                                translationY = -size.height * (1f - p)
-                                                            }
-                                                            .padding(bottom = sciBottomPadding)
-                                                            .height(sciTrayHeight)
-                                                            .background(
-                                                                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                                                shape = sciTrayShape
-                                                            )
-                                                            .border(
-                                                                width = 1.dp,
-                                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f),
-                                                                shape = sciTrayShape
-                                                            )
-                                                    ) {
-                                                        ScientificKeypadGrid(
-                                                            isInverse = state.isInverseMode,
-                                                            angleUnit = state.angleUnit,
-                                                            viewModel = viewModel,
-                                                            rowSpacing = if (isCompactVertical) 5.dp else 6.dp,
-                                                            restingCornerRadius = sciRestingCorner,
-                                                            pressedCornerRadius = sciPressedCorner,
-                                                            modifier = Modifier
-                                                                .fillMaxSize()
-                                                                .padding(horizontal = 8.dp, vertical = 7.dp)
-                                                        )
+                                                .padding(horizontal = 18.dp)
+                                                .padding(bottom = fxBottomGap)
+                                                .height(fxTrayHeight)
+                                                .then(
+                                                    if (!state.isScientificExpanded) {
+                                                        Modifier.clearAndSetSemantics {}
+                                                    } else {
+                                                        Modifier
+                                                    }
+                                                )
+                                                .graphicsLayer {
+                                                    val p = scientificExpandState.value.coerceIn(0f, 1f)
+                                                    compositingStrategy = CompositingStrategy.Offscreen
+                                                    alpha = if (p <= 0.001f) 0f else ((p - 0.06f) / 0.94f).coerceIn(0f, 1f)
+                                                    translationY = unifiedTargetShiftPx * p + (1f - p) * (size.height * 0.14f)
+                                                    clip = true
+                                                    shape = fxRevealClipShape
+                                                }
+                                                .drawWithContent {
+                                                    if (scientificExpandState.value > 0.001f || isSciExpandedState.value) {
+                                                        drawContent()
                                                     }
                                                 }
-                                            }
+                                        )
 
+                                        Column(modifier = Modifier.fillMaxSize()) {
+                                            CalculatorDisplay(
+                                                state = state,
+                                                onToggleTheme = { triggerThemeReveal { viewModel.cycleThemeMode() } },
+                                                onToggleSound = viewModel::toggleSoundEnabled,
+                                                onToggleVibration = { viewModel.toggleVibrationEnabled(view) },
+                                                onQuickToggleFeedback = { sound, vib ->
+                                                    viewModel.setFeedbackEnabled(sound, vib, view)
+                                                },
+                                                onToggleTopHistory = viewModel::toggleTopHistory,
+                                                onSetTopHistoryOpen = viewModel::setTopHistoryOpen,
+                                                onOpenFullHistory = { viewModel.setFullHistorySheetOpen(true) },
+                                                onOpenSettings = { viewModel.setSettingsSheetOpen(true) },
+                                                onInspectBigNumber = viewModel::openBigNumberViewer,
+                                                compactMode = isCompactVertical,
+                                                onThemeButtonPositioned = { themeButtonAnchorRoot = it },
+                                                bottomLiftState = displayLiftPxState,
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .heightIn(min = 175.dp)
+                                                    .onSizeChanged { displayCardHeightPxRef[0] = it.height }
+                                            )
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        translationY = -displayLiftPxState.value
+                                                    }
+                                            ) {
+                                                ScientificToggleStrip(
+                                                    isExpanded = state.isScientificExpanded,
+                                                    onToggle = viewModel::toggleScientificExpanded,
+                                                    onOpenVoiceInput = { viewModel.setVoiceInputDialogOpen(true) },
+                                                    glowTarget = state.glowTarget,
+                                                    glowIntensity = state.glowIntensity,
+                                                    glowColorOverride = resolvedGlowColor
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Lower region: Fixed-height bottom container keeps CalculatorDisplay zero-recompose even when unified keypad compresses!
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .navigationBarsPadding()
+                                            .padding(start = 18.dp, end = 18.dp, top = topPadDp, bottom = 8.dp)
+                                            .height(collapsedKeypadInnerDp)
+                                            .onGloballyPositioned { coords ->
+                                                if (coords.isAttached) {
+                                                    val pos = coords.positionInRoot()
+                                                    val left = pos.x - portraitColOriginRef[0]
+                                                    val top = pos.y - portraitColOriginRef[1]
+                                                    portraitKeypadInnerRectRef[0] = left
+                                                    portraitKeypadInnerRectRef[1] = top
+                                                    portraitKeypadInnerRectRef[2] = left + coords.size.width.toFloat()
+                                                    portraitKeypadInnerRectRef[3] = top + coords.size.height.toFloat()
+                                                }
+                                            },
+                                        contentAlignment = Alignment.BottomCenter
+                                    ) {
+                                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
                                             StandardKeypadGrid(
                                                 viewModel = viewModel,
-                                                rowHeight = null,
-                                                rowSpacing = collapsedRowSpacing,
-                                                collapsedRowHeight = collapsedRowHeight,
-                                                expandedRowHeight = expandedRowHeight,
-                                                collapsedRowSpacing = collapsedRowSpacing,
-                                                expandedRowSpacing = expandedRowSpacing,
-                                                expandProgressState = scientificExpandState,
-                                                contentScaleState = keypadContentScaleState,
+                                                rowHeight = stdRowHeight,
+                                                rowSpacing = stdRowSpacing,
+                                                collapsedRowHeight = stdRowHeight,
+                                                expandedRowHeight = unifiedCompressedRowH,
+                                                collapsedRowSpacing = stdRowSpacing,
+                                                expandedRowSpacing = unifiedCompressedGap,
+                                                expandProgressState = if (state.fxUnifiedWithKeypad) scientificExpandState else null,
+                                                contentScaleState = if (state.fxUnifiedWithKeypad) keypadContentScaleState else null,
                                                 restingCornerRadius = standardRestingCorner,
                                                 pressedCornerRadius = standardPressedCorner,
+                                                textScale = keypadTextScale,
+                                                glowTarget = state.glowTarget,
+                                                glowIntensity = state.glowIntensity,
+                                                glowColorOverride = resolvedGlowColor,
+                                                keyPressEffect = state.keyPressEffect,
+                                                pressSparksEnabled = state.pressSparksEnabled,
+                                                glowBreathingEnabled = state.glowBreathingEnabled,
                                                 modifier = Modifier.fillMaxWidth()
                                             )
                                         }
@@ -568,22 +850,48 @@ fun CalculatorScreen(
             if (isThemeRevealing) {
                 val revealRimColor = MaterialTheme.colorScheme.primary
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val progress = revealRadiusFraction.value
+                    val progress = revealRadiusFraction.value.coerceIn(0f, 1f)
                     val rimFade = (1f - progress).coerceIn(0f, 1f)
                     if (rimFade > 0.01f) {
-                        val origin = revealOriginRoot?.let { it - rootBoxOrigin }
-                            ?: Offset(size.width * 0.16f, size.height * 0.08f)
-                        val maxRadius = hypot(
-                            maxOf(origin.x, size.width - origin.x),
-                            maxOf(origin.y, size.height - origin.y)
-                        ) * 1.02f
-                        val radius = (maxRadius * progress).coerceAtLeast(1f)
-                        drawCircle(
-                            color = revealRimColor.copy(alpha = 0.34f * rimFade),
-                            radius = radius,
-                            center = origin,
-                            style = Stroke(width = 1.75.dp.toPx())
-                        )
+                        when (state.themeAnimStyle) {
+                            ThemeAnimStyle.CIRCLE_REVEAL -> {
+                                val origin = revealOriginRoot?.let { it - rootBoxOrigin }
+                                    ?: Offset(size.width * 0.16f, size.height * 0.08f)
+                                val maxRadius = hypot(
+                                    maxOf(origin.x, size.width - origin.x),
+                                    maxOf(origin.y, size.height - origin.y)
+                                ) * 1.02f
+                                val radius = (maxRadius * progress).coerceAtLeast(1f)
+                                drawCircle(
+                                    color = revealRimColor.copy(alpha = 0.34f * rimFade),
+                                    radius = radius,
+                                    center = origin,
+                                    style = Stroke(width = 1.75.dp.toPx())
+                                )
+                            }
+                            ThemeAnimStyle.DIAGONAL_WIPE -> {
+                                val d = (size.width + size.height) * progress
+                                val start = if (d <= size.width) Offset(d, 0f) else Offset(size.width, d - size.width)
+                                val end = if (d <= size.height) Offset(0f, d) else Offset(d - size.height, size.height)
+                                drawLine(
+                                    color = revealRimColor.copy(alpha = 0.45f * rimFade),
+                                    start = start,
+                                    end = end,
+                                    strokeWidth = 2.dp.toPx()
+                                )
+                            }
+                            ThemeAnimStyle.VERTICAL_CURTAIN -> {
+                                val y = size.height * progress
+                                drawLine(
+                                    color = revealRimColor.copy(alpha = 0.45f * rimFade),
+                                    start = Offset(0f, y),
+                                    end = Offset(size.width, y),
+                                    strokeWidth = 2.dp.toPx()
+                                )
+                            }
+                            ThemeAnimStyle.CROSSFADE,
+                            ThemeAnimStyle.INSTANT -> Unit
+                        }
                     }
                 }
             }
@@ -624,8 +932,22 @@ fun CalculatorScreen(
                 onToggleDynamicColor = viewModel::setUseDynamicColor,
                 onSelectCustomAccentArgb = viewModel::setCustomAccentArgb,
                 onSelectButtonShape = viewModel::setButtonShapeStyle,
+                onChangeKeypadScale = viewModel::setKeypadScale,
+                onChangeFxScale = viewModel::setFxScale,
+                onToggleFxUnified = viewModel::setFxUnifiedWithKeypad,
+                onSelectGlowTarget = viewModel::setGlowTarget,
+                onChangeGlowIntensity = viewModel::setGlowIntensity,
+                onSelectGlowColorPreset = viewModel::setGlowColorPreset,
+                onSelectKeyPressEffect = viewModel::setKeyPressEffect,
+                onSelectResultAnimStyle = viewModel::setResultAnimStyle,
+                onTogglePressSparks = viewModel::setPressSparksEnabled,
+                onToggleGlowBreathing = viewModel::setGlowBreathingEnabled,
+                onSelectThemeAnimStyle = viewModel::setThemeAnimStyle,
                 onToggleLivePreview = viewModel::setShowLivePreview,
                 onToggleAmbientDisplayGlow = viewModel::setAmbientDisplayGlow,
+                onSelectDisplayGlowStyle = viewModel::setDisplayGlowStyle,
+                onChangeDisplayGlowIntensity = viewModel::setDisplayGlowIntensity,
+                onSelectDisplayGlowColorPreset = viewModel::setDisplayGlowColorPreset,
                 onResetDefaults = viewModel::resetCustomizationsToDefaults
             )
         }
@@ -652,7 +974,10 @@ fun CalculatorScreen(
 private fun ScientificToggleStrip(
     isExpanded: Boolean,
     onToggle: () -> Unit,
-    onOpenVoiceInput: () -> Unit
+    onOpenVoiceInput: () -> Unit,
+    glowTarget: GlowTarget = GlowTarget.ACCENT_KEYS,
+    glowIntensity: Float = 1f,
+    glowColorOverride: Color? = null
 ) {
     val playSound = LocalPlayCalcSound.current
     val performHaptic = LocalPerformCalcHaptic.current
@@ -754,7 +1079,9 @@ private fun ScientificToggleStrip(
             contentDescription = stringResource(R.string.cd_voice_input),
             containerColor = MaterialTheme.colorScheme.tertiaryContainer,
             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            glowColor = MaterialTheme.colorScheme.tertiary,
+            glowColor = glowColorOverride ?: MaterialTheme.colorScheme.tertiary,
+            glowEnabled = glowTarget != GlowTarget.OFF,
+            glowIntensity = glowIntensity,
             testTag = "open_voice_input_button",
             onClick = {
                 playSound(com.example.audio.CalcSoundType.OPERATOR)
@@ -773,6 +1100,8 @@ private fun GlowingActionPill(
     containerColor: Color,
     contentColor: Color,
     glowColor: Color,
+    glowEnabled: Boolean = true,
+    glowIntensity: Float = 1f,
     testTag: String,
     onClick: () -> Unit
 ) {
@@ -804,6 +1133,8 @@ private fun GlowingActionPill(
         lerp(glowColor, Color.White, if (isDark) 0.45f else 0.58f)
     }
 
+    val clampedIntensity = glowIntensity.coerceIn(0.25f, 1.75f)
+
     Box(
         modifier = Modifier
             .minimumInteractiveComponentSize()
@@ -824,64 +1155,80 @@ private fun GlowingActionPill(
                     scaleX = s
                     scaleY = s
                 }
-                .drawBehind {
-                    val pulse = maxOf(glowPulse.value, if (isPressed) 0.7f else 0f)
-                    val baseAlpha = (if (isDark) 0.28f else 0.22f) + pulse * 0.18f
-                    val maxSpreadPx = (4.dp + (pulse * 2f).dp).toPx()
-                    val halfH = size.height / 2f
-                    val steps = 3
-                    for (i in steps downTo 1) {
-                        val t = i.toFloat() / steps.toFloat()
-                        val expand = maxSpreadPx * t
-                        val layerAlpha = baseAlpha * (1f - t * 0.68f) * 0.44f
-                        val corner = halfH + expand
-                        drawRoundRect(
-                            color = softGlowColor.copy(alpha = layerAlpha),
-                            topLeft = Offset(-expand, -expand),
-                            size = Size(size.width + expand * 2f, size.height + expand * 2f),
-                            cornerRadius = CornerRadius(corner, corner)
-                        )
+                .then(
+                    if (glowEnabled) {
+                        Modifier.drawBehind {
+                            val pulse = maxOf(glowPulse.value, if (isPressed) 0.7f else 0f)
+                            val baseAlpha = ((if (isDark) 0.28f else 0.22f) * clampedIntensity + pulse * 0.18f * clampedIntensity)
+                                .coerceIn(0f, 0.85f)
+                            val maxSpreadPx = ((4f * (0.72f + 0.28f * clampedIntensity)) + pulse * 2f * clampedIntensity).dp.toPx()
+                            val halfH = size.height / 2f
+                            val steps = 3
+                            for (i in steps downTo 1) {
+                                val t = i.toFloat() / steps.toFloat()
+                                val expand = maxSpreadPx * t
+                                val layerAlpha = (baseAlpha * (1f - t * 0.68f) * 0.44f).coerceIn(0f, 1f)
+                                val corner = halfH + expand
+                                drawRoundRect(
+                                    color = softGlowColor.copy(alpha = layerAlpha),
+                                    topLeft = Offset(-expand, -expand),
+                                    size = Size(size.width + expand * 2f, size.height + expand * 2f),
+                                    cornerRadius = CornerRadius(corner, corner)
+                                )
+                            }
+                        }
+                    } else {
+                        Modifier
                     }
-                }
+                )
                 .clip(CircleShape)
                 .background(containerColor)
                 .indication(interactionSource, ripple(bounded = true))
-                .drawWithCache {
-                    val sheenBrush = Brush.verticalGradient(
-                        0.0f to innerTintColor,
-                        0.55f to innerTintColor.copy(alpha = 0.28f),
-                        1.0f to Color.Transparent
-                    )
-                    val strokePx = 1.dp.toPx()
-                    val strokeHalf = strokePx / 2f
-                    val cornerPx = (size.height / 2f).coerceAtLeast(0f)
-                    val rimBrush = Brush.verticalGradient(
-                        0.0f to innerTintColor,
-                        1.0f to softGlowColor.copy(alpha = 0.34f)
-                    )
-                    val rimSize = Size(
-                        (size.width - strokePx).coerceAtLeast(0f),
-                        (size.height - strokePx).coerceAtLeast(0f)
-                    )
-                    val rimCorner = CornerRadius(
-                        (cornerPx - strokeHalf).coerceAtLeast(0f),
-                        (cornerPx - strokeHalf).coerceAtLeast(0f)
-                    )
-                    val rimStroke = Stroke(width = strokePx)
+                .then(
+                    if (glowEnabled) {
+                        Modifier.drawWithCache {
+                            val sheenBrush = Brush.verticalGradient(
+                                0.0f to innerTintColor,
+                                0.55f to innerTintColor.copy(alpha = 0.28f),
+                                1.0f to Color.Transparent
+                            )
+                            val strokePx = 1.dp.toPx()
+                            val strokeHalf = strokePx / 2f
+                            val cornerPx = (size.height / 2f).coerceAtLeast(0f)
+                            val rimBrush = Brush.verticalGradient(
+                                0.0f to innerTintColor,
+                                1.0f to softGlowColor.copy(alpha = 0.34f)
+                            )
+                            val rimSize = Size(
+                                (size.width - strokePx).coerceAtLeast(0f),
+                                (size.height - strokePx).coerceAtLeast(0f)
+                            )
+                            val rimCorner = CornerRadius(
+                                (cornerPx - strokeHalf).coerceAtLeast(0f),
+                                (cornerPx - strokeHalf).coerceAtLeast(0f)
+                            )
+                            val rimStroke = Stroke(width = strokePx)
 
-                    onDrawBehind {
-                        val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
-                        drawRect(brush = sheenBrush, alpha = 0.14f + pulse * 0.12f)
-                        drawRoundRect(
-                            brush = rimBrush,
-                            alpha = 0.36f + pulse * 0.22f,
-                            topLeft = Offset(strokeHalf, strokeHalf),
-                            size = rimSize,
-                            cornerRadius = rimCorner,
-                            style = rimStroke
-                        )
+                            onDrawBehind {
+                                val pulse = maxOf(glowPulse.value, if (isPressed) 0.65f else 0f)
+                                drawRect(
+                                    brush = sheenBrush,
+                                    alpha = ((0.14f * clampedIntensity) + pulse * 0.12f * clampedIntensity).coerceIn(0f, 0.72f)
+                                )
+                                drawRoundRect(
+                                    brush = rimBrush,
+                                    alpha = ((0.36f * clampedIntensity) + pulse * 0.22f * clampedIntensity).coerceIn(0f, 0.90f),
+                                    topLeft = Offset(strokeHalf, strokeHalf),
+                                    size = rimSize,
+                                    cornerRadius = rimCorner,
+                                    style = rimStroke
+                                )
+                            }
+                        }
+                    } else {
+                        Modifier
                     }
-                },
+                ),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -910,179 +1257,347 @@ private fun GlowingActionPill(
 }
 
 @Composable
-private fun ScientificKeypadGrid(
+private fun FxScientificPanel(
     isInverse: Boolean,
     angleUnit: AngleUnit,
+    buttonShapeStyle: ButtonShapeStyle,
     viewModel: CalculatorViewModel,
+    enabled: Boolean = true,
+    columns: Int = 5,
     rowSpacing: Dp = 6.dp,
-    restingCornerRadius: Dp = 15.dp,
-    pressedCornerRadius: Dp = 10.dp,
+    textScale: Float = 1f,
+    glowTarget: GlowTarget = GlowTarget.ACCENT_KEYS,
+    glowIntensity: Float = 1f,
+    glowColorOverride: Color? = null,
+    keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
+    pressSparksEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val parenStyle = MaterialTheme.typography.labelLarge.copy(
+    val restingCorner = when (buttonShapeStyle) {
+        ButtonShapeStyle.PILL -> 50.dp
+        ButtonShapeStyle.SQUIRCLE -> 14.dp
+        ButtonShapeStyle.SHARP -> 8.dp
+    }
+    val pressedCorner = when (buttonShapeStyle) {
+        ButtonShapeStyle.PILL -> 10.dp
+        ButtonShapeStyle.SQUIRCLE -> 8.dp
+        ButtonShapeStyle.SHARP -> 4.dp
+    }
+
+    val modeBg = MaterialTheme.colorScheme.secondaryContainer
+    val modePressedBg = MaterialTheme.colorScheme.secondary
+    val modeFg = MaterialTheme.colorScheme.onSecondaryContainer
+
+    val invActiveBg = MaterialTheme.colorScheme.tertiaryContainer
+    val invActiveFg = MaterialTheme.colorScheme.onTertiaryContainer
+
+    val normalBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    val normalFg = MaterialTheme.colorScheme.onSurface
+    val pressedBg = MaterialTheme.colorScheme.surfaceContainerHighest
+
+    val activeFuncBg = if (isInverse) invActiveBg else normalBg
+    val activeFuncFg = if (isInverse) invActiveFg else normalFg
+
+    val fxKeyRimColor = if (glowTarget == GlowTarget.ALL_KEYS) {
+        (glowColorOverride ?: MaterialTheme.colorScheme.primary)
+            .copy(alpha = (0.26f * glowIntensity.coerceIn(0.25f, 1.75f)).coerceIn(0.08f, 0.58f))
+    } else {
+        null
+    }
+
+    val labelStyle = MaterialTheme.typography.labelLarge.copy(
         fontFamily = PlusJakartaSansFontFamily,
-        fontSize = 15.sp,
-        fontWeight = FontWeight.SemiBold
+        fontSize = (14.5f * textScale).sp,
+        lineHeight = (17f * textScale).sp,
+        fontWeight = FontWeight.Medium,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+    val modeStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = (12.5f * textScale).sp,
+        lineHeight = (15f * textScale).sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.3.sp,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
 
-    // Single flat 5x3 grid Layout: zero Row/Column wrappers, zero weight() double-measurement passes
+    // Classic symmetric 5x3 (or 3x5 in landscape) M3 scientific grid in a single 1-pass Layout
     Layout(
-        modifier = modifier,
+        modifier = modifier.testTag("fx_scientific_panel"),
         content = {
-            // Row 1: DEG/RAD, INV, π, e, ±
-            ScientificCalcButton(
-                label = angleUnit.name,
-                isActive = true,
-                testTag = "btn_sci_angle_unit",
-                onClick = viewModel::toggleAngleUnit,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
+            // 0..4: INV, DEG/RAD, sin, cos, tan
             ScientificCalcButton(
                 label = "INV",
                 isActive = isInverse,
                 testTag = "btn_sci_inv",
+                enabled = enabled,
                 onClick = viewModel::toggleInverseMode,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = modeStyle,
+                containerColor = if (isInverse) invActiveBg else normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = if (isInverse) invActiveFg else normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
             )
+            ScientificCalcButton(
+                label = angleUnit.name,
+                isActive = true,
+                testTag = "btn_sci_angle_unit",
+                enabled = enabled,
+                onClick = viewModel::toggleAngleUnit,
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = modeStyle,
+                containerColor = modeBg,
+                pressedContainerColor = modePressedBg,
+                contentColorOverride = modeFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "sin⁻¹" else "sin",
+                isActive = isInverse,
+                testTag = "btn_sci_sin",
+                enabled = enabled,
+                onClick = { viewModel.onFunction(if (isInverse) "sin⁻¹(" else "sin(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "cos⁻¹" else "cos",
+                isActive = isInverse,
+                testTag = "btn_sci_cos",
+                enabled = enabled,
+                onClick = { viewModel.onFunction(if (isInverse) "cos⁻¹(" else "cos(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "tan⁻¹" else "tan",
+                isActive = isInverse,
+                testTag = "btn_sci_tan",
+                enabled = enabled,
+                onClick = { viewModel.onFunction(if (isInverse) "tan⁻¹(" else "tan(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+
+            // 5..9: π, e, xʸ, ln, log
             ScientificCalcButton(
                 label = "π",
                 isActive = false,
                 testTag = "btn_sci_pi",
+                enabled = enabled,
                 onClick = { viewModel.onConstant("π") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
             )
             ScientificCalcButton(
                 label = "e",
                 isActive = false,
                 testTag = "btn_sci_e",
+                enabled = enabled,
                 onClick = { viewModel.onConstant("e") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = "±",
-                isActive = false,
-                testTag = "btn_sci_sign",
-                onClick = viewModel::onToggleSign,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-
-            // Row 2: sin/sin⁻¹, cos/cos⁻¹, tan/tan⁻¹, ln/eˣ, log/10ˣ
-            ScientificCalcButton(
-                label = if (isInverse) "sin⁻¹" else "sin",
-                isActive = false,
-                testTag = "btn_sci_sin",
-                onClick = { viewModel.onFunction(if (isInverse) "sin⁻¹(" else "sin(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = if (isInverse) "cos⁻¹" else "cos",
-                isActive = false,
-                testTag = "btn_sci_cos",
-                onClick = { viewModel.onFunction(if (isInverse) "cos⁻¹(" else "cos(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = if (isInverse) "tan⁻¹" else "tan",
-                isActive = false,
-                testTag = "btn_sci_tan",
-                onClick = { viewModel.onFunction(if (isInverse) "tan⁻¹(" else "tan(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = if (isInverse) "eˣ" else "ln",
-                isActive = false,
-                testTag = "btn_sci_ln",
-                onClick = { if (isInverse) viewModel.onExpE() else viewModel.onFunction("ln(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = if (isInverse) "10ˣ" else "log",
-                isActive = false,
-                testTag = "btn_sci_log",
-                onClick = { if (isInverse) viewModel.onExp10() else viewModel.onFunction("log(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-
-            // Row 3: √/x², (, ), xʸ, x!
-            ScientificCalcButton(
-                label = if (isInverse) "x²" else "√",
-                isActive = false,
-                testTag = "btn_sci_sqrt",
-                onClick = { if (isInverse) viewModel.onSquare() else viewModel.onFunction("√(") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
-            )
-            ScientificCalcButton(
-                label = "(",
-                isActive = false,
-                testTag = "btn_sci_lparen",
-                onClick = viewModel::onOpenParenthesis,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius,
-                textStyle = parenStyle
-            )
-            ScientificCalcButton(
-                label = ")",
-                isActive = false,
-                testTag = "btn_sci_rparen",
-                onClick = viewModel::onCloseParenthesis,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius,
-                textStyle = parenStyle
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
             )
             ScientificCalcButton(
                 label = "xʸ",
                 isActive = false,
                 testTag = "btn_sci_pow",
+                enabled = enabled,
                 onClick = { viewModel.onOperator("^") },
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "eˣ" else "ln",
+                isActive = isInverse,
+                testTag = "btn_sci_ln",
+                enabled = enabled,
+                onClick = { if (isInverse) viewModel.onExpE() else viewModel.onFunction("ln(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "10ˣ" else "log",
+                isActive = isInverse,
+                testTag = "btn_sci_log",
+                enabled = enabled,
+                onClick = { if (isInverse) viewModel.onExp10() else viewModel.onFunction("log(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+
+            // 10..14: (, ), √, x!, ±
+            ScientificCalcButton(
+                label = "(",
+                isActive = false,
+                testTag = "btn_sci_lparen",
+                enabled = enabled,
+                onClick = viewModel::onOpenParenthesis,
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = ")",
+                isActive = false,
+                testTag = "btn_sci_rparen",
+                enabled = enabled,
+                onClick = viewModel::onCloseParenthesis,
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = if (isInverse) "x²" else "√",
+                isActive = isInverse,
+                testTag = "btn_sci_sqrt",
+                enabled = enabled,
+                onClick = { if (isInverse) viewModel.onSquare() else viewModel.onFunction("√(") },
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = activeFuncBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = activeFuncFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
             )
             ScientificCalcButton(
                 label = "x!",
                 isActive = false,
                 testTag = "btn_sci_fact",
+                enabled = enabled,
                 onClick = viewModel::onFactorial,
-                restingCornerRadius = restingCornerRadius,
-                pressedCornerRadius = pressedCornerRadius
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
+            )
+            ScientificCalcButton(
+                label = "±",
+                isActive = false,
+                testTag = "btn_sci_sign",
+                enabled = enabled,
+                onClick = viewModel::onToggleSign,
+                restingCornerRadius = restingCorner,
+                pressedCornerRadius = pressedCorner,
+                textStyle = labelStyle,
+                containerColor = normalBg,
+                pressedContainerColor = pressedBg,
+                contentColorOverride = normalFg,
+                borderColor = fxKeyRimColor,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled
             )
         }
     ) { measurables, constraints ->
-        val cols = 5
-        val rows = 3
+        val cols = columns.coerceAtLeast(1)
+        val rows = ((measurables.size + cols - 1) / cols).coerceAtLeast(1)
+        val maxW = constraints.maxWidth.coerceAtLeast(cols)
+        val maxH = constraints.maxHeight.coerceAtLeast(rows)
         val gapPx = rowSpacing.roundToPx().coerceAtLeast(0)
+
         val totalGapW = (cols - 1) * gapPx
+        val baseCellW = ((maxW - totalGapW) / cols).coerceAtLeast(1)
+        val extraW = (maxW - totalGapW - baseCellW * cols).coerceAtLeast(0)
+
         val totalGapH = (rows - 1) * gapPx
+        val baseCellH = ((maxH - totalGapH) / rows).coerceAtLeast(1)
+        val extraH = (maxH - totalGapH - baseCellH * rows).coerceAtLeast(0)
 
-        val baseCellW = ((constraints.maxWidth - totalGapW) / cols).coerceAtLeast(1)
-        val extraW = (constraints.maxWidth - totalGapW - baseCellW * cols).coerceAtLeast(0)
-
-        val baseCellH = ((constraints.maxHeight - totalGapH) / rows).coerceAtLeast(1)
-        val extraH = (constraints.maxHeight - totalGapH - baseCellH * rows).coerceAtLeast(0)
-
-        val placeables = measurables.mapIndexed { index, measurable ->
-            val col = index % cols
-            val row = index / cols
-            val cellW = baseCellW + if (col < extraW) 1 else 0
-            val cellH = baseCellH + if (row < extraH) 1 else 0
-            measurable.measure(Constraints.fixed(cellW, cellH))
+        val placeables = measurables.mapIndexed { idx, measurable ->
+            val col = idx % cols
+            val row = idx / cols
+            val w = baseCellW + if (col < extraW) 1 else 0
+            val h = baseCellH + if (row < extraH) 1 else 0
+            measurable.measure(Constraints.fixed(w, h))
         }
 
-        layout(constraints.maxWidth, constraints.maxHeight) {
+        layout(maxW, maxH) {
             var y = 0
             for (row in 0 until rows) {
-                val cellH = baseCellH + if (row < extraH) 1 else 0
                 var x = 0
+                val rowH = baseCellH + if (row < extraH) 1 else 0
                 for (col in 0 until cols) {
                     val idx = row * cols + col
                     if (idx < placeables.size) {
@@ -1091,7 +1606,7 @@ private fun ScientificKeypadGrid(
                         x += p.width + gapPx
                     }
                 }
-                y += cellH + gapPx
+                y += rowH + gapPx
             }
         }
     }
@@ -1110,17 +1625,27 @@ private fun StandardKeypadGrid(
     contentScaleState: State<Float>? = null,
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 14.dp,
+    textScale: Float = 1f,
+    glowTarget: GlowTarget = GlowTarget.ACCENT_KEYS,
+    glowIntensity: Float = 1f,
+    glowColorOverride: Color? = null,
+    keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
+    pressSparksEnabled: Boolean = false,
+    glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val accentGlow = glowTarget != GlowTarget.OFF
+    val keyGlow = glowTarget == GlowTarget.ALL_KEYS
+
     val operatorGlyphStyle = MaterialTheme.typography.headlineMedium.copy(
-        fontSize = 32.sp,
-        lineHeight = 32.sp,
+        fontSize = (32f * textScale).sp,
+        lineHeight = (32f * textScale).sp,
         fontWeight = FontWeight.Medium,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
     val parenStyle = MaterialTheme.typography.headlineMedium.copy(
         fontFamily = PlusJakartaSansFontFamily,
-        fontSize = 24.sp,
+        fontSize = (24f * textScale).sp,
         fontWeight = FontWeight.Normal
     )
 
@@ -1133,9 +1658,15 @@ private fun StandardKeypadGrid(
                 label = "AC",
                 role = CalcButtonRole.UTILITY,
                 testTag = "btn_ac",
-                hasGlow = true,
+                hasGlow = accentGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 onClick = viewModel::onAllClear
             )
@@ -1143,8 +1674,15 @@ private fun StandardKeypadGrid(
                 label = "( )",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_paren",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 onClick = viewModel::onSmartParenthesis
             ) {
@@ -1160,8 +1698,15 @@ private fun StandardKeypadGrid(
                 label = "%",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_percent",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 onClick = viewModel::onPercent
             )
@@ -1169,66 +1714,101 @@ private fun StandardKeypadGrid(
                 label = "÷",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_div",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("÷") }
             )
 
             // Row 2: 7, 8, 9, ×
-            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
+            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "×",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_mul",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("×") }
             )
 
             // Row 3: 4, 5, 6, −
-            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
+            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "−",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_sub",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("−") }
             )
 
             // Row 4: 1, 2, 3, +
-            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
-            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
+            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
+            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "+",
                 role = CalcButtonRole.OPERATOR,
                 testTag = "btn_add",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = { viewModel.onOperator("+") }
             )
 
             // Row 5: 0, ., ⌫, =
-            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState)
+            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, keyPressEffect, pressSparksEnabled, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = ".",
                 role = CalcButtonRole.DIGIT,
                 testTag = "btn_dot",
+                hasGlow = keyGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 onClick = viewModel::onDecimalPoint
             )
@@ -1236,9 +1816,15 @@ private fun StandardKeypadGrid(
                 label = "⌫",
                 role = CalcButtonRole.UTILITY,
                 testTag = "btn_backspace",
-                hasGlow = true,
+                hasGlow = accentGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 contentDescriptionText = stringResource(R.string.cd_backspace),
                 onClick = viewModel::onBackspace,
@@ -1247,16 +1833,22 @@ private fun StandardKeypadGrid(
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Backspace,
                     contentDescription = stringResource(R.string.cd_backspace),
-                    modifier = Modifier.size(21.dp)
+                    modifier = Modifier.size((21f * textScale).dp)
                 )
             }
             ExpressiveCalcButton(
                 label = "=",
                 role = CalcButtonRole.EQUALS,
                 testTag = "btn_equals",
-                hasGlow = true,
+                hasGlow = accentGlow,
+                glowIntensity = glowIntensity,
+                glowColorOverride = glowColorOverride,
+                keyPressEffect = keyPressEffect,
+                pressSparksEnabled = pressSparksEnabled,
+                glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
+                textScale = textScale,
                 contentScaleState = contentScaleState,
                 textStyle = operatorGlyphStyle,
                 onClick = viewModel::onEquals
@@ -1321,14 +1913,28 @@ private fun DigitButton(
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 14.dp,
     contentScaleState: State<Float>? = null,
+    textScale: Float = 1f,
+    hasGlow: Boolean = false,
+    glowIntensity: Float = 1f,
+    glowColorOverride: Color? = null,
+    keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
+    pressSparksEnabled: Boolean = false,
+    glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     ExpressiveCalcButton(
         label = digit,
         role = CalcButtonRole.DIGIT,
         testTag = "btn_$digit",
+        hasGlow = hasGlow,
+        glowIntensity = glowIntensity,
+        glowColorOverride = glowColorOverride,
+        keyPressEffect = keyPressEffect,
+        pressSparksEnabled = pressSparksEnabled,
+        glowBreathingEnabled = glowBreathingEnabled,
         restingCornerRadius = restingCornerRadius,
         pressedCornerRadius = pressedCornerRadius,
+        textScale = textScale,
         contentScaleState = contentScaleState,
         onClick = { viewModel.onDigit(digit) },
         modifier = modifier

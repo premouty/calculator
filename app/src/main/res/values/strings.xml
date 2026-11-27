@@ -112,10 +112,67 @@
     <string name="settings_shape_squircle">Сквіркл</string>
     <string name="settings_shape_sharp">Геометрія</string>
 
+    <string name="settings_section_layout">Розмір і режим панелей</string>
+    <string name="settings_section_customization_hub">Кастомізація та анімації</string>
+    <string name="settings_subsection_layout_shape">Макет, форма та розмір</string>
+    <string name="settings_subsection_glow_display">Підсвітка та сяйво дисплея</string>
+    <string name="settings_subsection_animations">Анімації та ефекти</string>
+
+    <string name="settings_layout_preview_label">Живий перегляд макета</string>
+    <string name="settings_layout_preview_hint">Торкніться макета, щоб перевірити fx</string>
+    <string name="settings_layout_preview_fx_open">fx відкрито</string>
+    <string name="settings_layout_preview_fx_closed">fx згорнуто</string>
+    <string name="settings_fx_mode_title">Розташування панелі fx</string>
+    <string name="settings_fx_mode_detached">Окремо</string>
+    <string name="settings_fx_mode_unified">З’єднано</string>
+    <string name="settings_fx_mode_detached_hint">Класичний режим: fx висувається під дисплеєм, цифри не змінюють висоту</string>
+    <string name="settings_fx_mode_unified_hint">З’єднана панель: при відкритті fx цифри стискаються, залишаючи більше місця зверху</string>
+    <string name="settings_keypad_size_title">Панель цифр</string>
+    <string name="settings_fx_size_title">Панель fx</string>
+
+    <string name="settings_section_glow">Підсвітка та сяйво</string>
+    <string name="settings_glow_target_title">Підсвітка клавіш</string>
+    <string name="settings_glow_target_off">Вимкнено</string>
+    <string name="settings_glow_target_accents">Акценти</string>
+    <string name="settings_glow_target_all">Усі клавіші</string>
+    <string name="settings_glow_intensity_title">Яскравість підсвітки</string>
+    <string name="settings_glow_color_title">Колір підсвітки</string>
+    <string name="settings_glow_color_auto">Авто</string>
+
+    <string name="settings_display_glow_style_title">Стиль сяйва дисплея</string>
+    <string name="settings_display_glow_aurora">Аврора</string>
+    <string name="settings_display_glow_neon_frame">Неон-рамка</string>
+    <string name="settings_display_glow_prism">Призма</string>
+    <string name="settings_display_glow_horizon">Горизонт</string>
+    <string name="settings_display_glow_intensity_title">Яскравість сяйва дисплея</string>
+    <string name="settings_display_glow_color_title">Колір сяйва дисплея</string>
+
+    <string name="settings_section_animations">Анімації та фішки</string>
+    <string name="settings_theme_anim_title">Анімація зміни теми</string>
+    <string name="settings_theme_anim_circle">Хвиля</string>
+    <string name="settings_theme_anim_crossfade">Згасання</string>
+    <string name="settings_theme_anim_diagonal">Діагональ</string>
+    <string name="settings_theme_anim_curtain">Шторка</string>
+    <string name="settings_theme_anim_instant">Миттєво</string>
+
+    <string name="settings_key_effect_title">Ефект натискання клавіш</string>
+    <string name="settings_key_effect_spring">Пружина</string>
+    <string name="settings_key_effect_shockwave">Хвиля</string>
+    <string name="settings_key_effect_neon">Іскра</string>
+    <string name="settings_key_effect_tilt">3D-нахил</string>
+    <string name="settings_result_anim_title">Анімація результату (=)</string>
+    <string name="settings_result_anim_slide">Плавно</string>
+    <string name="settings_result_anim_pop">Стрибок</string>
+    <string name="settings_result_anim_shimmer">Блік</string>
+    <string name="settings_press_sparks_title">Мікро-іскри при натисканні</string>
+    <string name="settings_press_sparks_subtitle">Легкий розліт іскорок від дотику без навантаження на FPS</string>
+    <string name="settings_glow_breathing_title">Дихання підсвітки</string>
+    <string name="settings_glow_breathing_subtitle">М’яка жива пульсація сяйва клавіш і дисплея</string>
+
     <string name="settings_live_preview_title">Жива підказка результату</string>
     <string name="settings_live_preview_subtitle">Показувати попередній результат під час введення</string>
     <string name="settings_ambient_glow_title">Атмосферне сяйво дисплея</string>
-    <string name="settings_ambient_glow_subtitle">М’яке фонове підсвічування картки дисплея</string>
+    <string name="settings_ambient_glow_subtitle">Виразне фонове підсвічування картки дисплея з вибором стилю</string>
     <string name="settings_reset_defaults">Скинути налаштування</string>
     <string name="settings_reset_done">Налаштування скинуто</string>
 </resources>

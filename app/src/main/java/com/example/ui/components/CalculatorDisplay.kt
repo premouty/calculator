@@ -77,6 +77,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -84,7 +85,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -106,12 +109,16 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -129,13 +136,17 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.audio.CalcSoundType
 import com.example.data.local.CalculationRecord
+import com.example.data.preferences.DisplayGlowStyle
+import com.example.data.preferences.ResultAnimStyle
 import com.example.domain.math.MathErrorType
 import com.example.ui.CalculatorUiState
 import com.example.ui.theme.ThemeMode
@@ -216,7 +227,8 @@ fun CalculatorDisplay(
     onInspectBigNumber: (String, String) -> Unit,
     modifier: Modifier = Modifier,
     compactMode: Boolean = false,
-    onThemeButtonPositioned: ((Offset) -> Unit)? = null
+    onThemeButtonPositioned: ((Offset) -> Unit)? = null,
+    bottomLiftState: State<Float>? = null
 ) {
     val scrollState = rememberScrollState()
     val errorTremor = remember { Animatable(0f) }
@@ -277,19 +289,52 @@ fun CalculatorDisplay(
     }
 
     val resultRevealAnim = remember { Animatable(1f) }
+    val resultShimmerAnim = remember { Animatable(0f) }
     var prevIsResultDisplayed by remember { mutableStateOf(state.isResultDisplayed) }
-    LaunchedEffect(state.isResultDisplayed, state.rawExpression.isEmpty()) {
+    LaunchedEffect(state.isResultDisplayed, state.rawExpression.isEmpty(), state.resultAnimStyle) {
         if (scrollState.value != 0) {
             scrollState.scrollTo(0)
         }
         if (state.isResultDisplayed && !prevIsResultDisplayed) {
-            resultRevealAnim.snapTo(0f)
-            resultRevealAnim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
-            )
+            when (state.resultAnimStyle) {
+                ResultAnimStyle.SLIDE_UP -> {
+                    resultRevealAnim.snapTo(0f)
+                    resultRevealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                    )
+                }
+                ResultAnimStyle.ELASTIC_POP -> {
+                    resultRevealAnim.snapTo(0f)
+                    resultRevealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.56f,
+                            stiffness = 540f
+                        )
+                    )
+                }
+                ResultAnimStyle.SHIMMER_SWEEP -> {
+                    resultRevealAnim.snapTo(0f)
+                    launch {
+                        resultRevealAnim.animateTo(
+                            targetValue = 1f,
+                            animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                        )
+                    }
+                    launch {
+                        resultShimmerAnim.snapTo(0f)
+                        resultShimmerAnim.animateTo(
+                            targetValue = 1f,
+                            animationSpec = tween(durationMillis = 520, easing = CubicBezierEasing(0.25f, 0.8f, 0.25f, 1f))
+                        )
+                        resultShimmerAnim.snapTo(0f)
+                    }
+                }
+            }
         } else if (!state.isResultDisplayed) {
             resultRevealAnim.snapTo(1f)
+            resultShimmerAnim.snapTo(0f)
         }
         prevIsResultDisplayed = state.isResultDisplayed
     }
@@ -318,11 +363,42 @@ fun CalculatorDisplay(
         }
     }
 
-    val cardShape = RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp)
+    val surfaceContainerColor = MaterialTheme.colorScheme.surfaceContainer
     val errorAccentColor = MaterialTheme.colorScheme.error
-    val ambientPrimaryColor = MaterialTheme.colorScheme.primary
-    val ambientTertiaryColor = MaterialTheme.colorScheme.tertiary
+    val isDarkDisplaySurface = surfaceContainerColor.luminance() < 0.5f
+    val displayGlowOverrideColor = state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
+    val ambientPrimaryColor = displayGlowOverrideColor ?: MaterialTheme.colorScheme.primary
+    val ambientTertiaryColor = displayGlowOverrideColor?.let {
+        lerp(it, MaterialTheme.colorScheme.tertiary, 0.42f)
+    } ?: MaterialTheme.colorScheme.tertiary
+    val displayGlowMul = state.displayGlowIntensity.coerceIn(0.40f, 2.0f)
+    val themeAlphaBoost = if (isDarkDisplaySurface) 1.0f else 1.22f
+    val ambientBorderPath = remember { Path() }
     val errorBorderPath = remember { Path() }
+    val maxLiftPxRef = remember { FloatArray(1) { Float.MAX_VALUE } }
+    val bottomHeightPxRef = remember { FloatArray(1) { 0f } }
+    val cardLiftShape = remember(bottomLiftState) {
+        object : Shape {
+            override fun createOutline(
+                size: Size,
+                layoutDirection: LayoutDirection,
+                density: Density
+            ): Outline {
+                val shift = (bottomLiftState?.value ?: 0f).coerceIn(0f, (size.height - 1f).coerceAtLeast(0f))
+                val bottom = (size.height - shift).coerceAtLeast(1f)
+                val r = with(density) { 32.dp.toPx() }.coerceAtMost(bottom * 0.5f)
+                return Outline.Rounded(
+                    RoundRect(
+                        left = 0f,
+                        top = -r,
+                        right = size.width,
+                        bottom = bottom,
+                        cornerRadius = CornerRadius(r, r)
+                    )
+                )
+            }
+        }
+    }
 
     val ambientDriftState = if (state.ambientDisplayGlow) {
         val transition = rememberInfiniteTransition(label = "display_ambient_glow")
@@ -339,75 +415,215 @@ fun CalculatorDisplay(
         null
     }
 
-    Surface(
-        shape = cardShape,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier
-            .fillMaxWidth()
-            .pointerInput(state.isTopHistoryOpen) {
-                detectVerticalDragGestures(
-                    onDragStart = { dragAccumulator = 0f },
-                    onDragEnd = {
-                        if (dragAccumulator > 50f && !state.isTopHistoryOpen) {
-                            onSetTopHistoryOpen(true)
-                        } else if (dragAccumulator < -50f && state.isTopHistoryOpen) {
-                            onSetTopHistoryOpen(false)
-                        }
-                        dragAccumulator = 0f
-                    },
-                    onVerticalDrag = { _, dragAmount ->
-                        dragAccumulator += dragAmount
-                    }
-                )
-            }
-    ) {
+    val ambientBreathState = if (state.ambientDisplayGlow && state.glowBreathingEnabled) {
+        val transition = rememberInfiniteTransition(label = "display_ambient_breath")
+        transition.animateFloat(
+            initialValue = 0.78f,
+            targetValue = 1.32f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 3100, easing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "display_ambient_breath_mul"
+        )
+    } else {
+        null
+    }
+
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
         Box(
-            modifier = Modifier
+            modifier = modifier
                 .fillMaxWidth()
+                .graphicsLayer {
+                    clip = true
+                    shape = cardLiftShape
+                }
+                .background(surfaceContainerColor)
+                .pointerInput(state.isTopHistoryOpen) {
+                    detectVerticalDragGestures(
+                        onDragStart = { dragAccumulator = 0f },
+                        onDragEnd = {
+                            if (dragAccumulator > 50f && !state.isTopHistoryOpen) {
+                                onSetTopHistoryOpen(true)
+                            } else if (dragAccumulator < -50f && state.isTopHistoryOpen) {
+                                onSetTopHistoryOpen(false)
+                            }
+                            dragAccumulator = 0f
+                        },
+                        onVerticalDrag = { _, dragAmount ->
+                            dragAccumulator += dragAmount
+                        }
+                    )
+                }
                 .drawBehind {
+                    val currentLift = (bottomLiftState?.value ?: 0f).coerceIn(0f, (size.height - 1f).coerceAtLeast(0f))
+                    val visibleBottom = (size.height - currentLift).coerceAtLeast(1f)
                     if (state.ambientDisplayGlow) {
                         val ambientDrift = ambientDriftState?.value ?: 0f
-                        val c1 = Offset(
-                            x = size.width * (0.20f + 0.16f * ambientDrift),
-                            y = size.height * (0.28f + 0.14f * (1f - ambientDrift))
-                        )
-                        val r1 = size.maxDimension * 0.62f
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                0.0f to ambientPrimaryColor.copy(alpha = 0.11f),
-                                0.6f to ambientPrimaryColor.copy(alpha = 0.04f),
-                                1.0f to Color.Transparent,
-                                center = c1,
-                                radius = r1
-                            ),
-                            center = c1,
-                            radius = r1
-                        )
+                        val breathMul = ambientBreathState?.value ?: 1f
+                        val intensity = displayGlowMul * breathMul * themeAlphaBoost
 
-                        val c2 = Offset(
-                            x = size.width * (0.82f - 0.14f * ambientDrift),
-                            y = size.height * (0.72f - 0.12f * ambientDrift)
-                        )
-                        val r2 = size.maxDimension * 0.56f
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                0.0f to ambientTertiaryColor.copy(alpha = 0.09f),
-                                0.6f to ambientTertiaryColor.copy(alpha = 0.03f),
-                                1.0f to Color.Transparent,
-                                center = c2,
-                                radius = r2
-                            ),
-                            center = c2,
-                            radius = r2
-                        )
+                        when (state.displayGlowStyle) {
+                            DisplayGlowStyle.AURORA -> {
+                                val c1 = Offset(
+                                    x = size.width * (0.18f + 0.22f * ambientDrift),
+                                    y = visibleBottom * (0.24f + 0.18f * (1f - ambientDrift))
+                                )
+                                val r1 = maxOf(size.width, visibleBottom) * 0.72f * (0.94f + 0.06f * breathMul)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.30f * intensity).coerceIn(0f, 0.65f)),
+                                        0.48f to ambientPrimaryColor.copy(alpha = (0.13f * intensity).coerceIn(0f, 0.34f)),
+                                        1.0f to Color.Transparent,
+                                        center = c1,
+                                        radius = r1
+                                    ),
+                                    center = c1,
+                                    radius = r1
+                                )
+
+                                val c2 = Offset(
+                                    x = size.width * (0.84f - 0.18f * ambientDrift),
+                                    y = visibleBottom * (0.76f - 0.14f * ambientDrift)
+                                )
+                                val r2 = maxOf(size.width, visibleBottom) * 0.66f * (0.94f + 0.06f * breathMul)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        0.0f to ambientTertiaryColor.copy(alpha = (0.26f * intensity).coerceIn(0f, 0.58f)),
+                                        0.52f to ambientTertiaryColor.copy(alpha = (0.11f * intensity).coerceIn(0f, 0.28f)),
+                                        1.0f to Color.Transparent,
+                                        center = c2,
+                                        radius = r2
+                                    ),
+                                    center = c2,
+                                    radius = r2
+                                )
+
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.55f to Color.Transparent,
+                                        1.0f to ambientPrimaryColor.copy(alpha = (0.14f * intensity).coerceIn(0f, 0.34f))
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+                            }
+
+                            DisplayGlowStyle.NEON_FRAME -> {
+                                val cornerPx = 32.dp.toPx()
+                                val softWashAlpha = (0.18f * intensity).coerceIn(0f, 0.44f)
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.35f to Color.Transparent,
+                                        1.0f to ambientPrimaryColor.copy(alpha = softWashAlpha)
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+
+                                val outerStrokePx = 5.5.dp.toPx()
+                                val innerStrokePx = 1.75.dp.toPx()
+                                val inset = innerStrokePx / 2f
+                                ambientBorderPath.reset()
+                                ambientBorderPath.addRoundRect(
+                                    RoundRect(
+                                        left = inset,
+                                        top = -cornerPx,
+                                        right = size.width - inset,
+                                        bottom = visibleBottom - inset,
+                                        topLeftCornerRadius = CornerRadius.Zero,
+                                        topRightCornerRadius = CornerRadius.Zero,
+                                        bottomLeftCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset),
+                                        bottomRightCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset)
+                                    )
+                                )
+                                val frameBrush = Brush.horizontalGradient(
+                                    colors = listOf(
+                                        ambientPrimaryColor.copy(alpha = (0.72f * intensity).coerceIn(0f, 0.95f)),
+                                        ambientTertiaryColor.copy(alpha = (0.78f * intensity).coerceIn(0f, 0.95f)),
+                                        ambientPrimaryColor.copy(alpha = (0.72f * intensity).coerceIn(0f, 0.95f))
+                                    ),
+                                    startX = -size.width * 0.2f * ambientDrift,
+                                    endX = size.width * (1.0f + 0.2f * ambientDrift)
+                                )
+                                drawPath(
+                                    path = ambientBorderPath,
+                                    brush = frameBrush,
+                                    alpha = 0.28f,
+                                    style = Stroke(width = outerStrokePx)
+                                )
+                                drawPath(
+                                    path = ambientBorderPath,
+                                    brush = frameBrush,
+                                    alpha = 0.85f,
+                                    style = Stroke(width = innerStrokePx)
+                                )
+                            }
+
+                            DisplayGlowStyle.PRISM_WAVE -> {
+                                val shiftX = size.width * 0.26f * (ambientDrift - 0.5f)
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.28f * intensity).coerceIn(0f, 0.56f)),
+                                        0.50f to ambientTertiaryColor.copy(alpha = (0.20f * intensity).coerceIn(0f, 0.44f)),
+                                        1.0f to ambientPrimaryColor.copy(alpha = (0.10f * intensity).coerceIn(0f, 0.28f)),
+                                        start = Offset(shiftX, 0f),
+                                        end = Offset(size.width + shiftX, visibleBottom)
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+                                val cWave = Offset(
+                                    x = size.width * (0.30f + 0.40f * ambientDrift),
+                                    y = visibleBottom * 0.62f
+                                )
+                                val rWave = size.width * 0.58f
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        0.0f to Color.White.copy(alpha = (0.14f * intensity).coerceIn(0f, 0.28f)),
+                                        0.45f to ambientTertiaryColor.copy(alpha = (0.18f * intensity).coerceIn(0f, 0.42f)),
+                                        1.0f to Color.Transparent,
+                                        center = cWave,
+                                        radius = rWave
+                                    ),
+                                    center = cWave,
+                                    radius = rWave
+                                )
+                            }
+
+                            DisplayGlowStyle.BOTTOM_HORIZON -> {
+                                val horizonCenter = Offset(
+                                    x = size.width * (0.36f + 0.28f * ambientDrift),
+                                    y = visibleBottom * 0.96f
+                                )
+                                val horizonRadius = maxOf(size.width * 0.88f, visibleBottom * 0.85f)
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.42f * intensity).coerceIn(0f, 0.78f)),
+                                        0.42f to ambientTertiaryColor.copy(alpha = (0.22f * intensity).coerceIn(0f, 0.45f)),
+                                        0.78f to ambientPrimaryColor.copy(alpha = (0.06f * intensity).coerceIn(0f, 0.16f)),
+                                        1.0f to Color.Transparent,
+                                        center = horizonCenter,
+                                        radius = horizonRadius
+                                    ),
+                                    center = horizonCenter,
+                                    radius = horizonRadius
+                                )
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.42f to Color.Transparent,
+                                        0.86f to ambientPrimaryColor.copy(alpha = (0.16f * intensity).coerceIn(0f, 0.36f)),
+                                        1.0f to ambientTertiaryColor.copy(alpha = (0.32f * intensity).coerceIn(0f, 0.62f))
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+                            }
+                        }
                     }
 
                     val flash = errorFlash.value
                     val persist = persistentErrorAlpha
                     if (flash > 0.005f || persist > 0.005f) {
                         val auraAlpha = (0.055f * persist + 0.13f * flash).coerceIn(0f, 0.24f)
-                        val auraCenter = Offset(size.width * 0.72f, size.height * 0.78f)
-                        val auraRadius = size.maxDimension * 0.75f
+                        val auraCenter = Offset(size.width * 0.72f, visibleBottom * 0.78f)
+                        val auraRadius = maxOf(size.width, visibleBottom) * 0.75f
                         drawCircle(
                             brush = Brush.radialGradient(
                                 0.0f to errorAccentColor.copy(alpha = auraAlpha),
@@ -430,7 +646,7 @@ fun CalculatorDisplay(
                                 left = inset,
                                 top = -cornerPx,
                                 right = size.width - inset,
-                                bottom = size.height - inset,
+                                bottom = visibleBottom - inset,
                                 topLeftCornerRadius = CornerRadius.Zero,
                                 topRightCornerRadius = CornerRadius.Zero,
                                 bottomLeftCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset),
@@ -556,7 +772,25 @@ fun CalculatorDisplay(
                 }
 
             // Bottom portion of display: Completed expression, Active display, Preview, Pull handle
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        val raw = bottomLiftState?.value ?: 0f
+                        if (raw > 0f) {
+                            translationY = -raw
+                            val maxLift = maxLiftPxRef[0]
+                            val bottomH = bottomHeightPxRef[0]
+                            if (raw > maxLift && bottomH > 1f) {
+                                val avail = (bottomH - (raw - maxLift)).coerceAtLeast(bottomH * 0.58f)
+                                val s = (avail / bottomH).coerceIn(0.58f, 1f)
+                                scaleX = s
+                                scaleY = s
+                                transformOrigin = TransformOrigin(1f, 1f)
+                            }
+                        }
+                    }
+            ) {
                 AnimatedVisibility(
                     visible = state.isResultDisplayed && state.lastCompletedExpression.isNotEmpty(),
                     enter = fadeIn() + slideInVertically { it / 2 },
@@ -734,9 +968,44 @@ fun CalculatorDisplay(
                                         .padding(horizontal = 2.dp)
                                         .graphicsLayer {
                                             val p = resultRevealAnim.value
-                                            if (p < 1f) {
-                                                alpha = 0.25f + 0.75f * p
-                                                translationY = (1f - p) * 14.dp.toPx()
+                                            if (p != 1f) {
+                                                alpha = (0.25f + 0.75f * p).coerceIn(0f, 1f)
+                                                if (state.resultAnimStyle == ResultAnimStyle.ELASTIC_POP) {
+                                                    val s = 0.84f + 0.16f * p
+                                                    scaleX = s
+                                                    scaleY = s
+                                                    transformOrigin = TransformOrigin(1f, 0.5f)
+                                                    translationY = (1f - p) * 8.dp.toPx()
+                                                } else {
+                                                    translationY = (1f - p) * 14.dp.toPx()
+                                                }
+                                            }
+                                            if (state.resultAnimStyle == ResultAnimStyle.SHIMMER_SWEEP &&
+                                                resultShimmerAnim.value in 0.001f..0.999f
+                                            ) {
+                                                compositingStrategy = CompositingStrategy.Offscreen
+                                            }
+                                        }
+                                        .drawWithContent {
+                                            drawContent()
+                                            val sh = resultShimmerAnim.value
+                                            if (state.resultAnimStyle == ResultAnimStyle.SHIMMER_SWEEP &&
+                                                sh > 0.001f && sh < 0.999f
+                                            ) {
+                                                val bandW = (size.width * 0.36f).coerceAtLeast(52.dp.toPx())
+                                                val startX = -bandW + (size.width + bandW * 2f) * sh
+                                                drawRect(
+                                                    brush = Brush.linearGradient(
+                                                        colors = listOf(
+                                                            Color.Transparent,
+                                                            Color.White.copy(alpha = 0.65f),
+                                                            Color.Transparent
+                                                        ),
+                                                        start = Offset(startX, 0f),
+                                                        end = Offset(startX + bandW, size.height)
+                                                    ),
+                                                    blendMode = BlendMode.SrcAtop
+                                                )
                                             }
                                         }
                                         .testTag("calculator_main_display")
@@ -998,6 +1267,8 @@ fun CalculatorDisplay(
                 val totalHeight = maxOf(constraints.minHeight, contentHeight).let { h ->
                     if (constraints.hasBoundedHeight) h.coerceAtMost(constraints.maxHeight) else h
                 }
+                maxLiftPxRef[0] = (totalHeight - contentHeight).coerceAtLeast(0).toFloat()
+                bottomHeightPxRef[0] = bottomPlaceable.height.toFloat()
                 layout(constraints.maxWidth, totalHeight) {
                     topPlaceable.placeRelative(0, 0)
                     bottomPlaceable.placeRelative(
