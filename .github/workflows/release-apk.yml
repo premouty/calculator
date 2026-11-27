@@ -1,15 +1,17 @@
-name: Build Android APK
+name: Build APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -17,33 +19,59 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
+      - name: Generate debug keystore if missing
         run: |
           if [ ! -f "debug.keystore" ]; then
-            keytool -genkeypair -v -keystore debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+
+      - name: Set version code
+        id: version
+        run: |
           VERSION_CODE=$((41 + ${{ github.run_number }}))
-          gradle assembleDebug -PversionCode=${VERSION_CODE} --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/ExpressiveCalc-v0.1.${{ github.run_number }}.apk
+          echo "code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "name=v0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Debug APK
+        run: |
+          ./gradlew assembleDebug -PversionCode=${{ steps.version.outputs.code }} --no-daemon
+
+      - name: Prepare APK artifact
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/ExpressiveCalc-${{ steps.version.outputs.name }}.apk"
+
+      - name: Upload debug keystore artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-keystore
+          path: debug.keystore
+          if-no-files-found: ignore
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: calculator-apk
-          path: app/build/outputs/apk/debug/ExpressiveCalc-v0.1.${{ github.run_number }}.apk
+          name: expressive-calc-${{ steps.version.outputs.name }}
+          path: dist/ExpressiveCalc-${{ steps.version.outputs.name }}.apk
 
       - name: Publish APK to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.${{ github.run_number }}
-          name: ExpressiveCalc v0.1.${{ github.run_number }}
-          files: app/build/outputs/apk/debug/ExpressiveCalc-v0.1.${{ github.run_number }}.apk
+          tag_name: ${{ steps.version.outputs.name }}
+          name: ExpressiveCalc ${{ steps.version.outputs.name }} (versionCode ${{ steps.version.outputs.code }})
+          files: dist/ExpressiveCalc-${{ steps.version.outputs.name }}.apk
+          generate_release_notes: true
