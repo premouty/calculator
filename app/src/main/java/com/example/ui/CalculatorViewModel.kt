@@ -15,6 +15,7 @@ import com.example.data.local.CalculationRecord
 import com.example.data.local.CalculatorDatabase
 import com.example.data.preferences.AngleUnit
 import com.example.data.preferences.ButtonShapeStyle
+import com.example.data.preferences.DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB
 import com.example.data.preferences.DEFAULT_FX_SCALE
 import com.example.data.preferences.DEFAULT_GLOW_INTENSITY
 import com.example.data.preferences.DEFAULT_KEYPAD_SCALE
@@ -25,7 +26,7 @@ import com.example.data.preferences.DynamicColorVibrancy
 import com.example.data.preferences.GlowColorPreset
 import com.example.data.preferences.GlowTarget
 import com.example.data.preferences.KeyPressEffect
-import com.example.data.preferences.PressSparkStyle
+import com.example.data.preferences.ExpressiveTouchStyle
 import com.example.data.preferences.ResultAnimStyle
 import com.example.data.preferences.ThemeAnimStyle
 import com.example.data.preferences.UserPreferencesRepository
@@ -97,18 +98,18 @@ data class CalculatorUiState(
     val keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     val resultAnimStyle: ResultAnimStyle = ResultAnimStyle.SLIDE_UP,
     val pressSparksEnabled: Boolean = false,
-    val pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    val expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     val glowBreathingEnabled: Boolean = false,
     val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.INSTANT,
     val displayGlowStyle: DisplayGlowStyle = DisplayGlowStyle.AURORA,
     val displayGlowIntensity: Float = DEFAULT_GLOW_INTENSITY,
     val displayGlowColorPreset: GlowColorPreset = GlowColorPreset.AUTO,
+    val displayGlowCustomArgb: Long = DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB,
     val pendingFeedbackPermission: FeedbackPermissionTarget? = null,
     val isTopHistoryOpen: Boolean = false,
     val isFullHistorySheetOpen: Boolean = false,
     val isVoiceInputDialogOpen: Boolean = false,
     val isSettingsSheetOpen: Boolean = false,
-    val settingsScrollPosition: Int = 0,
     val settingsVibrationExpanded: Boolean = false,
     val bigNumberViewerRecord: Pair<String, String>? = null, // title/expression to full plain digits
     val history: List<CalculationRecord> = emptyList()
@@ -162,6 +163,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     private var hasUserModifiedDisplayGlowStyle = false
     private var hasUserModifiedDisplayGlowIntensity = false
     private var hasUserModifiedDisplayGlowColorPreset = false
+    private var hasUserModifiedDisplayGlowCustomArgb = false
 
     private val _state = MutableStateFlow(
         CalculatorUiState(
@@ -197,12 +199,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = initialPrefs.keyPressEffect,
             resultAnimStyle = initialPrefs.resultAnimStyle,
             pressSparksEnabled = initialPrefs.pressSparksEnabled,
-            pressSparkStyle = initialPrefs.pressSparkStyle,
+            expressiveTouchStyle = initialPrefs.expressiveTouchStyle,
             glowBreathingEnabled = initialPrefs.glowBreathingEnabled,
             themeAnimStyle = initialPrefs.themeAnimStyle,
             displayGlowStyle = initialPrefs.displayGlowStyle,
             displayGlowIntensity = initialPrefs.displayGlowIntensity,
-            displayGlowColorPreset = initialPrefs.displayGlowColorPreset
+            displayGlowColorPreset = initialPrefs.displayGlowColorPreset,
+            displayGlowCustomArgb = initialPrefs.displayGlowCustomArgb
         )
     )
     private val _rawExpression = MutableStateFlow("")
@@ -249,12 +252,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                         keyPressEffect = if (hasUserModifiedKeyPressEffect) current.keyPressEffect else dsPrefs.keyPressEffect,
                         resultAnimStyle = if (hasUserModifiedResultAnimStyle) current.resultAnimStyle else dsPrefs.resultAnimStyle,
                         pressSparksEnabled = if (hasUserModifiedPressSparks) current.pressSparksEnabled else dsPrefs.pressSparksEnabled,
-                        pressSparkStyle = if (hasUserModifiedPressSparkStyle) current.pressSparkStyle else dsPrefs.pressSparkStyle,
+                        expressiveTouchStyle = if (hasUserModifiedPressSparkStyle) current.expressiveTouchStyle else dsPrefs.expressiveTouchStyle,
                         glowBreathingEnabled = if (hasUserModifiedGlowBreathing) current.glowBreathingEnabled else dsPrefs.glowBreathingEnabled,
                         themeAnimStyle = if (hasUserModifiedThemeAnimStyle) current.themeAnimStyle else dsPrefs.themeAnimStyle,
                         displayGlowStyle = if (hasUserModifiedDisplayGlowStyle) current.displayGlowStyle else dsPrefs.displayGlowStyle,
                         displayGlowIntensity = if (hasUserModifiedDisplayGlowIntensity) current.displayGlowIntensity else dsPrefs.displayGlowIntensity,
-                        displayGlowColorPreset = if (hasUserModifiedDisplayGlowColorPreset) current.displayGlowColorPreset else dsPrefs.displayGlowColorPreset
+                        displayGlowColorPreset = if (hasUserModifiedDisplayGlowColorPreset) current.displayGlowColorPreset else dsPrefs.displayGlowColorPreset,
+                        displayGlowCustomArgb = if (hasUserModifiedDisplayGlowCustomArgb) current.displayGlowCustomArgb else dsPrefs.displayGlowCustomArgb
                     )
                 }
             }
@@ -300,12 +304,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = prefs.keyPressEffect,
             resultAnimStyle = prefs.resultAnimStyle,
             pressSparksEnabled = prefs.pressSparksEnabled,
-            pressSparkStyle = prefs.pressSparkStyle,
+            expressiveTouchStyle = prefs.expressiveTouchStyle,
             glowBreathingEnabled = prefs.glowBreathingEnabled,
             themeAnimStyle = prefs.themeAnimStyle,
             displayGlowStyle = prefs.displayGlowStyle,
             displayGlowIntensity = prefs.displayGlowIntensity,
-            displayGlowColorPreset = prefs.displayGlowColorPreset
+            displayGlowColorPreset = prefs.displayGlowColorPreset,
+            displayGlowCustomArgb = prefs.displayGlowCustomArgb
         )
     }.stateIn(
         scope = viewModelScope,
@@ -343,12 +348,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
             keyPressEffect = initialPrefs.keyPressEffect,
             resultAnimStyle = initialPrefs.resultAnimStyle,
             pressSparksEnabled = initialPrefs.pressSparksEnabled,
-            pressSparkStyle = initialPrefs.pressSparkStyle,
+            expressiveTouchStyle = initialPrefs.expressiveTouchStyle,
             glowBreathingEnabled = initialPrefs.glowBreathingEnabled,
             themeAnimStyle = initialPrefs.themeAnimStyle,
             displayGlowStyle = initialPrefs.displayGlowStyle,
             displayGlowIntensity = initialPrefs.displayGlowIntensity,
-            displayGlowColorPreset = initialPrefs.displayGlowColorPreset
+            displayGlowColorPreset = initialPrefs.displayGlowColorPreset,
+            displayGlowCustomArgb = initialPrefs.displayGlowCustomArgb
         )
     )
 
@@ -1101,11 +1107,11 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun setPressSparkStyle(style: PressSparkStyle) {
+    fun setExpressiveTouchStyle(style: ExpressiveTouchStyle) {
         hasUserModifiedPressSparkStyle = true
-        _optimisticPrefs.update { it.copy(pressSparkStyle = style) }
+        _optimisticPrefs.update { it.copy(expressiveTouchStyle = style) }
         viewModelScope.launch {
-            prefsRepository.setPressSparkStyle(style)
+            prefsRepository.setExpressiveTouchStyle(style)
         }
     }
 
@@ -1150,6 +1156,20 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun setDisplayGlowCustomArgb(argb: Long) {
+        hasUserModifiedDisplayGlowCustomArgb = true
+        hasUserModifiedDisplayGlowColorPreset = true
+        _optimisticPrefs.update {
+            it.copy(
+                displayGlowCustomArgb = argb,
+                displayGlowColorPreset = GlowColorPreset.CUSTOM
+            )
+        }
+        viewModelScope.launch {
+            prefsRepository.setDisplayGlowCustomArgb(argb)
+        }
+    }
+
     fun resetCustomizationsToDefaults() {
         hasUserModifiedSoundVolume = true
         hasUserModifiedHapticIntensity = true
@@ -1183,6 +1203,7 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         hasUserModifiedDisplayGlowStyle = true
         hasUserModifiedDisplayGlowIntensity = true
         hasUserModifiedDisplayGlowColorPreset = true
+        hasUserModifiedDisplayGlowCustomArgb = true
         _optimisticPrefs.update {
             it.copy(
                 soundVolume = DEFAULT_SOUND_VOLUME,
@@ -1211,12 +1232,13 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
                 keyPressEffect = KeyPressEffect.SPRING,
                 resultAnimStyle = ResultAnimStyle.SLIDE_UP,
                 pressSparksEnabled = false,
-                pressSparkStyle = PressSparkStyle.SPARKS,
+                expressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
                 glowBreathingEnabled = false,
                 themeAnimStyle = ThemeAnimStyle.INSTANT,
                 displayGlowStyle = DisplayGlowStyle.AURORA,
                 displayGlowIntensity = DEFAULT_GLOW_INTENSITY,
-                displayGlowColorPreset = GlowColorPreset.AUTO
+                displayGlowColorPreset = GlowColorPreset.AUTO,
+                displayGlowCustomArgb = DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB
             )
         }
         viewModelScope.launch {
@@ -1265,11 +1287,14 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun setSettingsScrollPosition(position: Int) {
-        val clamped = position.coerceAtLeast(0)
-        if (_state.value.settingsScrollPosition != clamped) {
-            _state.update { it.copy(settingsScrollPosition = clamped) }
-        }
+    var savedSettingsScrollIndex: Int = 0
+        private set
+    var savedSettingsScrollOffset: Int = 0
+        private set
+
+    fun saveSettingsScrollPosition(index: Int, offset: Int) {
+        savedSettingsScrollIndex = index.coerceAtLeast(0)
+        savedSettingsScrollOffset = offset.coerceAtLeast(0)
     }
 
     fun setSettingsVibrationExpanded(expanded: Boolean) {

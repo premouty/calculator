@@ -120,6 +120,8 @@
     <string name="settings_custom_color_title">Власний колір акценту</string>
     <string name="settings_custom_color_hue">Відтінок</string>
     <string name="settings_custom_color_saturation">Насиченість</string>
+    <string name="settings_color_recommended">Рекомендовані</string>
+    <string name="settings_color_custom">Свій</string>
     <string name="settings_button_shape_title">Форма кнопок</string>
     <string name="settings_shape_pill">Округлі</string>
     <string name="settings_shape_squircle">Сквіркл</string>
@@ -176,12 +178,16 @@
     <string name="settings_result_anim_slide">Плавно</string>
     <string name="settings_result_anim_pop">Стрибок</string>
     <string name="settings_result_anim_shimmer">Блік</string>
-    <string name="settings_press_sparks_title">Мікро-іскри при натисканні</string>
-    <string name="settings_press_sparks_subtitle">Помітний розліт іскорок поверх клавіш при дотику</string>
-    <string name="settings_press_sparks_style_title">Варіант мікро-іскор</string>
-    <string name="settings_press_sparks_sparks">Іскри</string>
-    <string name="settings_press_sparks_starlight">Зірочки</string>
-    <string name="settings_press_sparks_firework">Салют</string>
+    <string name="settings_press_sparks_title">Експресивний відгук</string>
+    <string name="settings_press_sparks_subtitle">Жива геометрія та тональні хвилі у стилі Material Expressive</string>
+    <string name="settings_press_sparks_style_title">Стиль ефекту</string>
+    <string name="settings_press_sparks_halo">Ореол</string>
+    <string name="settings_press_sparks_petal">Пелюстка</string>
+    <string name="settings_press_sparks_wave">Хвиля</string>
+    <string name="settings_press_sparks_capsules">Капсули</string>
+    <string name="settings_press_sparks_clover">Конюшина</string>
+    <string name="settings_press_sparks_prism">Призма</string>
+    <string name="settings_expressive_preview_hint">Натисніть на клавіші, щоб перевірити ефект</string>
     <string name="settings_glow_breathing_title">Дихання сяйва дисплея</string>
     <string name="settings_glow_breathing_subtitle">М’яка жива пульсація атмосферного сяйва дисплея</string>
 

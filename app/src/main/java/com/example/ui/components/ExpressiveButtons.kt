@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.graphics.BlurMaskFilter
+import android.os.Build
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
@@ -46,11 +48,15 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -65,8 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.audio.CalcSoundType
+import com.example.data.preferences.ExpressiveTouchStyle
 import com.example.data.preferences.KeyPressEffect
-import com.example.data.preferences.PressSparkStyle
 import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
@@ -79,33 +85,107 @@ val LocalPerformCalcHaptic = compositionLocalOf<(CalcSoundType) -> Unit> { {} }
 
 private val GlowFadeEasing = CubicBezierEasing(0.18f, 1f, 0.32f, 1f)
 
-// Precomputed 14-direction spark lookup tables (zero per-frame allocations)
-private const val SPARK_COUNT = 14
-private val SPARK_ANGLES_RAD = FloatArray(SPARK_COUNT) { i ->
-    val jitter = ((i * 37) % 13) - 6f
-    ((-90f + i * (360f / SPARK_COUNT) + jitter) * (PI.toFloat() / 180f))
+internal class GlowPaintCache {
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.FILL
+    }
+    val strokePaint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.STROKE
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    var lastBlurRadius: Float = -1f
+    var lastStrokeBlurRadius: Float = -1f
 }
-private val SPARK_COS = FloatArray(SPARK_COUNT) { i -> cos(SPARK_ANGLES_RAD[i]) }
-private val SPARK_SIN = FloatArray(SPARK_COUNT) { i -> sin(SPARK_ANGLES_RAD[i]) }
-private val SPARK_SPEED = FloatArray(SPARK_COUNT) { i -> 0.72f + ((i * 53) % 10) * 0.045f }
-private val SPARK_CURL = FloatArray(SPARK_COUNT) { i -> if (i % 2 == 0) 1f else -1f }
 
-// Precomputed 12-shell firework lookup tables
-private const val FW_COUNT = 12
-private val FW_ANGLES_RAD = FloatArray(FW_COUNT) { i ->
-    ((-90f + i * (360f / FW_COUNT) + if (i % 2 == 0) 4f else -4f) * (PI.toFloat() / 180f))
+internal fun DrawScope.drawSmoothBacklight(
+    cache: GlowPaintCache,
+    color: Color,
+    alpha: Float,
+    expandPx: Float,
+    blurRadiusPx: Float,
+    cornerRadiusPx: Float,
+    cornerExpandRatio: Float = 0.72f
+) {
+    val clampedAlpha = alpha.coerceIn(0f, 0.92f)
+    if (clampedAlpha <= 0.002f) return
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val safeBlur = blurRadiusPx.coerceAtLeast(1f)
+        if (abs(safeBlur - cache.lastBlurRadius) >= 0.75f) {
+            cache.paint.maskFilter = BlurMaskFilter(safeBlur, BlurMaskFilter.Blur.NORMAL)
+            cache.lastBlurRadius = safeBlur
+        }
+        cache.paint.color = color.copy(alpha = clampedAlpha).toArgb()
+        val c = (cornerRadiusPx + expandPx * cornerExpandRatio).coerceAtLeast(0f)
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawRoundRect(
+                -expandPx,
+                -expandPx,
+                size.width + expandPx,
+                size.height + expandPx,
+                c,
+                c,
+                cache.paint
+            )
+        }
+    } else {
+        // Ultra-smooth 14-step sub-pixel Gaussian fallback for API 24-27
+        val totalSpread = expandPx + blurRadiusPx
+        val steps = 14
+        for (i in steps downTo 1) {
+            val t = i.toFloat() / steps.toFloat()
+            val curExpand = totalSpread * t
+            val gaussian = kotlin.math.exp(-2.8f * t * t)
+            val layerAlpha = (clampedAlpha * 0.16f * gaussian).coerceIn(0f, 1f)
+            val c = (cornerRadiusPx + curExpand * cornerExpandRatio).coerceAtLeast(0f)
+            drawRoundRect(
+                color = color.copy(alpha = layerAlpha),
+                topLeft = Offset(-curExpand, -curExpand),
+                size = Size(size.width + curExpand * 2f, size.height + curExpand * 2f),
+                cornerRadius = CornerRadius(c, c)
+            )
+        }
+    }
 }
-private val FW_COS = FloatArray(FW_COUNT) { i -> cos(FW_ANGLES_RAD[i]) }
-private val FW_SIN = FloatArray(FW_COUNT) { i -> sin(FW_ANGLES_RAD[i]) }
-private val FW_SUB_COS = FloatArray(FW_COUNT * 2) { idx ->
-    val shell = idx / 2
-    val offset = if (idx % 2 == 0) 0.42f else -0.42f
-    cos(FW_ANGLES_RAD[shell] + offset)
+
+private val ExpressiveTouchEasing = CubicBezierEasing(0.16f, 1.0f, 0.30f, 1.0f)
+
+// Precomputed Material 3 Expressive 8-lobe scalloped flower ("Cookie") unit vertices (64-pt ultra-smooth curve)
+private const val FLOWER_PTS = 64
+private val FLOWER_X = FloatArray(FLOWER_PTS) { i ->
+    val theta = (i.toFloat() / FLOWER_PTS.toFloat()) * (2f * PI.toFloat())
+    val r = 0.88f + 0.12f * cos(8f * theta)
+    r * cos(theta)
 }
-private val FW_SUB_SIN = FloatArray(FW_COUNT * 2) { idx ->
-    val shell = idx / 2
-    val offset = if (idx % 2 == 0) 0.42f else -0.42f
-    sin(FW_ANGLES_RAD[shell] + offset)
+private val FLOWER_Y = FloatArray(FLOWER_PTS) { i ->
+    val theta = (i.toFloat() / FLOWER_PTS.toFloat()) * (2f * PI.toFloat())
+    val r = 0.88f + 0.12f * cos(8f * theta)
+    r * sin(theta)
+}
+
+// Precomputed Material 3 Expressive 4-leaf puffy clover unit vertices
+private const val CLOVER_PTS = 56
+private val CLOVER_X = FloatArray(CLOVER_PTS) { i ->
+    val theta = (i.toFloat() / CLOVER_PTS.toFloat()) * (2f * PI.toFloat())
+    val r = 0.78f + 0.22f * cos(4f * theta)
+    r * cos(theta)
+}
+private val CLOVER_Y = FloatArray(CLOVER_PTS) { i ->
+    val theta = (i.toFloat() / CLOVER_PTS.toFloat()) * (2f * PI.toFloat())
+    val r = 0.78f + 0.22f * cos(4f * theta)
+    r * sin(theta)
+}
+
+// Precomputed 10 radial directions for Material Expressive perimeter capsule burst
+private const val CAPSULE_COUNT = 10
+private val CAPSULE_COS = FloatArray(CAPSULE_COUNT) { i ->
+    cos((-90f + i * (360f / CAPSULE_COUNT)) * (PI.toFloat() / 180f))
+}
+private val CAPSULE_SIN = FloatArray(CAPSULE_COUNT) { i ->
+    sin((-90f + i * (360f / CAPSULE_COUNT)) * (PI.toFloat() / 180f))
 }
 
 enum class CalcButtonRole {
@@ -133,7 +213,7 @@ fun ExpressiveCalcButton(
     colorTintEnabled: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
-    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     glowBreathingEnabled: Boolean = false,
     restingCornerRadius: Dp = 50.dp,
     pressedCornerRadius: Dp = 16.dp,
@@ -160,6 +240,9 @@ fun ExpressiveCalcButton(
     }
     val sparkPath = remember(pressSparksEnabled) {
         if (pressSparksEnabled) Path() else null
+    }
+    val expressiveGlowCache = remember(pressSparksEnabled) {
+        if (pressSparksEnabled) GlowPaintCache() else null
     }
     val pressPosRef = remember { FloatArray(2) { -1f } }
 
@@ -210,8 +293,8 @@ fun ExpressiveCalcButton(
                         sparkAnim.animateTo(
                             targetValue = 1f,
                             animationSpec = tween(
-                                durationMillis = if (role == CalcButtonRole.EQUALS) 640 else 560,
-                                easing = GlowFadeEasing
+                                durationMillis = if (role == CalcButtonRole.EQUALS) 560 else 500,
+                                easing = ExpressiveTouchEasing
                             )
                         )
                         sparkAnim.snapTo(0f)
@@ -369,14 +452,16 @@ fun ExpressiveCalcButton(
     }
     val clampedGlowIntensity = glowIntensity.coerceIn(0.25f, 1.75f)
     val glowRoleScale = if (role == CalcButtonRole.DIGIT || role == CalcButtonRole.OPERATOR) 0.58f else 1f
-    val sparkTintColor = when {
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val onPrimaryColor = MaterialTheme.colorScheme.onPrimary
+    val expressivePrimaryTint = when {
         hasGlow -> softGlowColor
         glowColorOverride != null -> glowColorOverride
         role == CalcButtonRole.EQUALS -> primaryColor
         role == CalcButtonRole.UTILITY -> tertiaryColor
         else -> primaryColor
     }
-    val sparkAccentColor = MaterialTheme.colorScheme.tertiary
+    val expressiveAccentTint = MaterialTheme.colorScheme.tertiary
 
     // Dynamic Shape reads cornerRadiusState during outline/draw phase so press morphing avoids recomposition
     val dynamicShape = remember(cornerRadiusState) {
@@ -401,7 +486,10 @@ fun ExpressiveCalcButton(
         }
     }
 
-    val clickIndication = ripple(bounded = true, color = restingContentColor.copy(alpha = 0.20f))
+    val clickIndication = ripple(
+        bounded = true,
+        color = restingContentColor.copy(alpha = if (pressSparksEnabled) 0.06f else 0.20f)
+    )
 
     val clickModifier = if (onLongClick != null) {
         Modifier.combinedClickable(
@@ -448,60 +536,62 @@ fun ExpressiveCalcButton(
             }
             .then(
                 if (hasGlow && glowPulse != null) {
+                    val glowPaintCache = remember { GlowPaintCache() }
                     Modifier.drawBehind {
                         val pulse = maxOf(glowPulse.value, if (isPressed) 0.70f else 0f)
                         val basePeakAlpha = when {
-                            role == CalcButtonRole.EQUALS && isDark -> 0.46f
-                            role == CalcButtonRole.EQUALS -> 0.36f
-                            isDark -> 0.34f
-                            else -> 0.26f
+                            role == CalcButtonRole.EQUALS && isDark -> 0.56f
+                            role == CalcButtonRole.EQUALS -> 0.44f
+                            isDark -> 0.42f
+                            else -> 0.34f
                         }
                         val effectiveRoleScale = if (role == CalcButtonRole.DIGIT || role == CalcButtonRole.OPERATOR) 0.72f else 1f
-                        val peakAlpha = (basePeakAlpha * clampedGlowIntensity * effectiveRoleScale +
-                            pulse * 0.22f * clampedGlowIntensity).coerceIn(0f, 0.92f)
-                        val spreadFactor = (0.72f + 0.28f * clampedGlowIntensity) *
-                            (if (effectiveRoleScale < 1f) 0.84f else 1f)
-                        val maxSpreadPx = ((10.5f * spreadFactor) + pulse * 5.5f * clampedGlowIntensity).dp.toPx()
+                        val glowAlpha = (basePeakAlpha * clampedGlowIntensity * effectiveRoleScale +
+                            pulse * 0.24f * clampedGlowIntensity).coerceIn(0f, 0.88f)
+                        val spreadFactor = (0.76f + 0.24f * clampedGlowIntensity) *
+                            (if (effectiveRoleScale < 1f) 0.86f else 1f)
+                        val expandPx = ((1.8f * spreadFactor) + pulse * 1.3f * clampedGlowIntensity).dp.toPx()
+                        val blurRadiusPx = ((9.5f * spreadFactor) + pulse * 4.5f * clampedGlowIntensity).dp.toPx()
 
                         val minHalf = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
                         val clampedCornerPx = cornerRadiusState.value.toPx().coerceIn(0f, minHalf)
                         val roundness = (clampedCornerPx / minHalf).coerceIn(0f, 1f)
                         val cornerExpandRatio = 0.56f + 0.44f * roundness
 
-                        val steps = 5
-                        for (i in steps downTo 1) {
-                            val t = i.toFloat() / steps.toFloat()
-                            val expand = maxSpreadPx * t
-                            val falloff = (1f - t * 0.78f)
-                            val layerAlpha = (peakAlpha * 0.44f * falloff * falloff).coerceIn(0f, 1f)
-                            val layerCorner = (clampedCornerPx + expand * cornerExpandRatio).coerceAtLeast(0f)
-                            drawRoundRect(
-                                color = softGlowColor.copy(alpha = layerAlpha),
-                                topLeft = Offset(-expand, -expand),
-                                size = Size(size.width + expand * 2f, size.height + expand * 2f),
-                                cornerRadius = CornerRadius(layerCorner, layerCorner)
-                            )
-                        }
+                        drawSmoothBacklight(
+                            cache = glowPaintCache,
+                            color = softGlowColor,
+                            alpha = glowAlpha,
+                            expandPx = expandPx,
+                            blurRadiusPx = blurRadiusPx,
+                            cornerRadiusPx = clampedCornerPx,
+                            cornerExpandRatio = cornerExpandRatio
+                        )
                     }
                 } else {
                     Modifier
                 }
             )
             .then(
-                if (sparkAnim != null && sparkPath != null) {
-                    Modifier.drawWithContent {
-                        drawContent()
+                if (sparkAnim != null && sparkPath != null && expressiveGlowCache != null) {
+                    Modifier.drawBehind {
                         val sp = sparkAnim.value
                         if (sp > 0.001f && sp < 0.999f) {
-                            drawPressSparks(
+                            val minHalf = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
+                            val liveCornerPx = cornerRadiusState.value.toPx().coerceIn(0f, minHalf)
+                            drawExpressiveOuterEffect(
                                 progress = sp,
                                 cx = if (pressPosRef[0] >= 0f) pressPosRef[0] else size.width * 0.5f,
                                 cy = if (pressPosRef[1] >= 0f) pressPosRef[1] else size.height * 0.5f,
-                                style = pressSparkStyle,
-                                primaryTint = sparkTintColor,
-                                accentTint = sparkAccentColor,
+                                style = expressiveTouchStyle,
+                                primaryTint = expressivePrimaryTint,
+                                secondaryTint = secondaryColor,
+                                tertiaryTint = expressiveAccentTint,
+                                isDarkTheme = isDark,
                                 isAccentKey = role == CalcButtonRole.EQUALS || role == CalcButtonRole.UTILITY,
-                                starPath = sparkPath
+                                cornerRadiusPx = liveCornerPx,
+                                reusablePath = sparkPath,
+                                glowCache = expressiveGlowCache
                             )
                         }
                     }
@@ -543,7 +633,7 @@ fun ExpressiveCalcButton(
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0.0f to Color.White.copy(alpha = flashAlpha),
-                                        0.55f to sparkTintColor.copy(alpha = flashAlpha * 0.72f),
+                                        0.55f to expressivePrimaryTint.copy(alpha = flashAlpha * 0.72f),
                                         1.0f to Color.Transparent,
                                         center = center,
                                         radius = r
@@ -590,6 +680,28 @@ fun ExpressiveCalcButton(
                                     radius = rad
                                 )
                             }
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .then(
+                if (sparkAnim != null) {
+                    Modifier.drawBehind {
+                        val sp = sparkAnim.value
+                        if (sp > 0.001f && sp < 0.999f) {
+                            drawExpressiveInnerEffect(
+                                progress = sp,
+                                cx = if (pressPosRef[0] >= 0f) pressPosRef[0] else size.width * 0.5f,
+                                cy = if (pressPosRef[1] >= 0f) pressPosRef[1] else size.height * 0.5f,
+                                style = expressiveTouchStyle,
+                                primaryTint = expressivePrimaryTint,
+                                tertiaryTint = expressiveAccentTint,
+                                onPrimaryTint = onPrimaryColor,
+                                isDarkTheme = isDark,
+                                isSolidPrimaryKey = role == CalcButtonRole.EQUALS
+                            )
                         }
                     }
                 } else {
@@ -681,7 +793,7 @@ fun ScientificCalcButton(
     glowIntensity: Float = 1.0f,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
-    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS
+    expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressAnim = remember { Animatable(0f) }
@@ -697,6 +809,9 @@ fun ScientificCalcButton(
     }
     val sparkPath = remember(pressSparksEnabled) {
         if (pressSparksEnabled) Path() else null
+    }
+    val expressiveGlowCache = remember(pressSparksEnabled) {
+        if (pressSparksEnabled) GlowPaintCache() else null
     }
     val pressPosRef = remember { FloatArray(2) { -1f } }
     val currentPlaySound by rememberUpdatedState(LocalPlayCalcSound.current)
@@ -760,7 +875,9 @@ fun ScientificCalcButton(
         MaterialTheme.colorScheme.onSurface
     }
     val primaryTint = MaterialTheme.colorScheme.primary
+    val secondaryTint = MaterialTheme.colorScheme.secondary
     val tertiaryTint = MaterialTheme.colorScheme.tertiary
+    val onPrimaryTint = MaterialTheme.colorScheme.onPrimary
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val softGlowColor = remember(primaryTint, tertiaryTint, isActive, isDark) {
         val raw = if (isActive) tertiaryTint else primaryTint
@@ -795,46 +912,54 @@ fun ScientificCalcButton(
             }
             .then(
                 if (hasGlow) {
+                    val fxGlowCache = remember { GlowPaintCache() }
                     Modifier.drawBehind {
                         val p = pressAnim.value
-                        val baseAlpha = (if (isActive) 0.30f else 0.22f) * clampedGlow + p * 0.16f * clampedGlow
-                        val maxSpreadPx = ((6.5f * (0.75f + 0.25f * clampedGlow)) + p * 3.5f * clampedGlow).dp.toPx()
+                        val glowAlpha = ((if (isActive) 0.42f else 0.30f) * clampedGlow + p * 0.22f * clampedGlow)
+                            .coerceIn(0f, 0.85f)
+                        val spreadFactor = 0.78f + 0.22f * clampedGlow
+                        val expandPx = (1.2f * spreadFactor + p * 1.0f * clampedGlow).dp.toPx()
+                        val blurRadiusPx = (6.8f * spreadFactor + p * 3.4f * clampedGlow).dp.toPx()
                         val maxR = minOf(size.width, size.height) / 2f
                         val baseCorner = restingCornerRadius.toPx().coerceIn(0f, maxR)
-                        val steps = 4
-                        for (i in steps downTo 1) {
-                            val t = i.toFloat() / steps.toFloat()
-                            val expand = maxSpreadPx * t
-                            val falloff = 1f - t * 0.78f
-                            val layerAlpha = (baseAlpha * 0.45f * falloff * falloff).coerceIn(0f, 0.85f)
-                            val c = (baseCorner + expand * 0.7f).coerceAtLeast(0f)
-                            drawRoundRect(
-                                color = softGlowColor.copy(alpha = layerAlpha),
-                                topLeft = Offset(-expand, -expand),
-                                size = Size(size.width + expand * 2f, size.height + expand * 2f),
-                                cornerRadius = CornerRadius(c, c)
-                            )
-                        }
+
+                        drawSmoothBacklight(
+                            cache = fxGlowCache,
+                            color = softGlowColor,
+                            alpha = glowAlpha,
+                            expandPx = expandPx,
+                            blurRadiusPx = blurRadiusPx,
+                            cornerRadiusPx = baseCorner,
+                            cornerExpandRatio = 0.72f
+                        )
                     }
                 } else {
                     Modifier
                 }
             )
             .then(
-                if (sparkAnim != null && sparkPath != null) {
-                    Modifier.drawWithContent {
-                        drawContent()
+                if (sparkAnim != null && sparkPath != null && expressiveGlowCache != null) {
+                    Modifier.drawBehind {
                         val sp = sparkAnim.value
                         if (sp > 0.001f && sp < 0.999f) {
-                            drawPressSparks(
+                            val maxR = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
+                            val restingPx = restingCornerRadius.toPx()
+                            val pressedPx = pressedCornerRadius.toPx()
+                            val liveCornerPx = (restingPx + (pressedPx - restingPx) * pressAnim.value)
+                                .coerceIn(0f, maxR)
+                            drawExpressiveOuterEffect(
                                 progress = sp,
                                 cx = if (pressPosRef[0] >= 0f) pressPosRef[0] else size.width * 0.5f,
                                 cy = if (pressPosRef[1] >= 0f) pressPosRef[1] else size.height * 0.5f,
-                                style = pressSparkStyle,
+                                style = expressiveTouchStyle,
                                 primaryTint = primaryTint,
-                                accentTint = tertiaryTint,
+                                secondaryTint = secondaryTint,
+                                tertiaryTint = tertiaryTint,
+                                isDarkTheme = isDark,
                                 isAccentKey = isActive,
-                                starPath = sparkPath
+                                cornerRadiusPx = liveCornerPx,
+                                reusablePath = sparkPath,
+                                glowCache = expressiveGlowCache
                             )
                         }
                     }
@@ -898,10 +1023,35 @@ fun ScientificCalcButton(
                     }
                 }
             }
+            .then(
+                if (sparkAnim != null) {
+                    Modifier.drawBehind {
+                        val sp = sparkAnim.value
+                        if (sp > 0.001f && sp < 0.999f) {
+                            drawExpressiveInnerEffect(
+                                progress = sp,
+                                cx = if (pressPosRef[0] >= 0f) pressPosRef[0] else size.width * 0.5f,
+                                cy = if (pressPosRef[1] >= 0f) pressPosRef[1] else size.height * 0.5f,
+                                style = expressiveTouchStyle,
+                                primaryTint = primaryTint,
+                                tertiaryTint = tertiaryTint,
+                                onPrimaryTint = onPrimaryTint,
+                                isDarkTheme = isDark,
+                                isSolidPrimaryKey = isActive
+                            )
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .clickable(
                 enabled = enabled,
                 interactionSource = interactionSource,
-                indication = ripple(bounded = true, color = contentColor.copy(alpha = 0.22f)),
+                indication = ripple(
+                    bounded = true,
+                    color = contentColor.copy(alpha = if (pressSparksEnabled) 0.07f else 0.22f)
+                ),
                 role = Role.Button,
                 onClick = onClick
             )
@@ -920,255 +1070,472 @@ fun ScientificCalcButton(
     }
 }
 
-private fun DrawScope.drawPressSparks(
+private fun DrawScope.drawBlurredGlowPath(
+    cache: GlowPaintCache,
+    path: Path,
+    color: Color,
+    alpha: Float,
+    blurRadiusPx: Float
+) {
+    val safeAlpha = alpha.coerceIn(0f, 0.9f)
+    if (safeAlpha <= 0.003f) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val safeBlur = blurRadiusPx.coerceAtLeast(1f)
+        if (abs(safeBlur - cache.lastBlurRadius) >= 0.75f) {
+            cache.paint.maskFilter = BlurMaskFilter(safeBlur, BlurMaskFilter.Blur.NORMAL)
+            cache.lastBlurRadius = safeBlur
+        }
+        cache.paint.color = color.copy(alpha = safeAlpha).toArgb()
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawPath(path.asAndroidPath(), cache.paint)
+        }
+    } else {
+        drawPath(
+            path = path,
+            color = color.copy(alpha = (safeAlpha * 0.45f).coerceIn(0f, 1f)),
+            style = Stroke(width = blurRadiusPx * 0.7f)
+        )
+    }
+}
+
+private fun DrawScope.drawBlurredGlowStrokeRoundRect(
+    cache: GlowPaintCache,
+    color: Color,
+    alpha: Float,
+    expandPx: Float,
+    cornerRadiusPx: Float,
+    strokeWidthPx: Float,
+    blurRadiusPx: Float
+) {
+    val safeAlpha = alpha.coerceIn(0f, 0.9f)
+    if (safeAlpha <= 0.003f) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        val safeBlur = blurRadiusPx.coerceAtLeast(1f)
+        if (abs(safeBlur - cache.lastStrokeBlurRadius) >= 0.75f) {
+            cache.strokePaint.maskFilter = BlurMaskFilter(safeBlur, BlurMaskFilter.Blur.NORMAL)
+            cache.lastStrokeBlurRadius = safeBlur
+        }
+        cache.strokePaint.strokeWidth = strokeWidthPx
+        cache.strokePaint.color = color.copy(alpha = safeAlpha).toArgb()
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawRoundRect(
+                -expandPx,
+                -expandPx,
+                size.width + expandPx,
+                size.height + expandPx,
+                cornerRadiusPx,
+                cornerRadiusPx,
+                cache.strokePaint
+            )
+        }
+    } else {
+        drawRoundRect(
+            color = color.copy(alpha = (safeAlpha * 0.4f).coerceIn(0f, 1f)),
+            topLeft = Offset(-expandPx, -expandPx),
+            size = Size(size.width + expandPx * 2f, size.height + expandPx * 2f),
+            cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx),
+            style = Stroke(width = strokeWidthPx * 1.6f)
+        )
+    }
+}
+
+/**
+ * Pass 1 (drawn behind the keycap surface): Smooth, GPU-feathered Material 3 Expressive shapes,
+ * halos, waves, and perimeter capsules that bloom outside the button without obscuring digits.
+ */
+private fun DrawScope.drawExpressiveOuterEffect(
     progress: Float,
     cx: Float,
     cy: Float,
-    style: PressSparkStyle,
+    style: ExpressiveTouchStyle,
     primaryTint: Color,
-    accentTint: Color,
+    secondaryTint: Color,
+    tertiaryTint: Color,
+    isDarkTheme: Boolean,
     isAccentKey: Boolean,
-    starPath: Path
+    cornerRadiusPx: Float,
+    reusablePath: Path,
+    glowCache: GlowPaintCache
 ) {
-    val ease = 1f - (1f - progress).pow(2.35f)
-    val fade = (1f - progress).pow(1.25f)
-    val maxDist = (maxOf(size.width, size.height) * if (isAccentKey) 0.92f else 0.78f)
-        .coerceAtLeast(34.dp.toPx())
-    val goldColor = Color(0xFFFFD86B)
-    val hotCyan = lerp(primaryTint, Color.White, 0.38f)
-    val warmAccent = lerp(accentTint, Color.White, 0.28f)
+    val ease = 1f - (1f - progress).pow(2.45f)
+    val fade = (1f - progress).pow(1.35f)
+    val minDim = minOf(size.width, size.height).coerceAtLeast(24.dp.toPx())
+    val maxDim = maxOf(size.width, size.height).coerceAtLeast(minDim)
+
+    val toneA = if (isDarkTheme) lerp(primaryTint, Color.White, 0.30f) else primaryTint
+    val toneB = if (isDarkTheme) lerp(tertiaryTint, Color.White, 0.28f) else tertiaryTint
+    val toneC = if (isDarkTheme) lerp(secondaryTint, Color.White, 0.25f) else secondaryTint
+
+    // Gently pull center from finger contact toward button center so wide/tall keys frame evenly
+    val bx = cx + (size.width * 0.5f - cx) * (0.48f + 0.36f * ease)
+    val by = cy + (size.height * 0.5f - cy) * (0.48f + 0.36f * ease)
 
     when (style) {
-        PressSparkStyle.SPARKS -> {
-            // 1. Initial plasma flash & subtle shock ring at tap center
-            if (progress < 0.34f) {
-                val flashP = (1f - progress / 0.34f).pow(1.5f)
-                val flashR = (10.dp.toPx() + maxDist * 0.45f * progress).coerceAtLeast(2f)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        0.0f to Color.White.copy(alpha = 0.65f * flashP),
-                        0.5f to hotCyan.copy(alpha = 0.34f * flashP),
-                        1.0f to Color.Transparent,
-                        center = Offset(cx, cy),
-                        radius = flashR
+        ExpressiveTouchStyle.TONAL_HALO -> {
+            // Soft blurred ambient cushion behind the key
+            val expand1 = (if (isAccentKey) 14f else 11.5f).dp.toPx() * ease
+            val c1 = (cornerRadiusPx + expand1 * 0.85f).coerceAtLeast(0f)
+            drawSmoothBacklight(
+                cache = glowCache,
+                color = toneA,
+                alpha = (0.42f * fade).coerceIn(0f, 1f),
+                expandPx = expand1 * 0.35f,
+                blurRadiusPx = (10f + 8f * ease).dp.toPx(),
+                cornerRadiusPx = cornerRadiusPx
+            )
+            // Primary luminous feathered + crisp Material rounded contour
+            val stroke1 = (2.8f - 1.9f * ease).coerceAtLeast(0.75f).dp.toPx()
+            drawBlurredGlowStrokeRoundRect(
+                cache = glowCache,
+                color = toneA,
+                alpha = (0.48f * fade).coerceIn(0f, 1f),
+                expandPx = expand1,
+                cornerRadiusPx = c1,
+                strokeWidthPx = stroke1 * 2.2f,
+                blurRadiusPx = 5.dp.toPx()
+            )
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        toneA.copy(alpha = (0.88f * fade).coerceIn(0f, 1f)),
+                        toneB.copy(alpha = (0.82f * fade).coerceIn(0f, 1f)),
+                        toneC.copy(alpha = (0.76f * fade).coerceIn(0f, 1f))
                     ),
-                    center = Offset(cx, cy),
-                    radius = flashR
+                    start = Offset(-expand1, -expand1),
+                    end = Offset(size.width + expand1, size.height + expand1)
+                ),
+                topLeft = Offset(-expand1, -expand1),
+                size = Size(size.width + expand1 * 2f, size.height + expand1 * 2f),
+                cornerRadius = CornerRadius(c1, c1),
+                style = Stroke(width = stroke1)
+            )
+            // Secondary staggered Material contour
+            if (progress > 0.14f) {
+                val p2 = ((progress - 0.14f) / 0.86f).coerceIn(0f, 1f)
+                val e2 = 1f - (1f - p2).pow(2.2f)
+                val f2 = (1f - p2).pow(1.4f)
+                val expand2 = (if (isAccentKey) 9.0f else 7.2f).dp.toPx() * e2
+                val c2 = (cornerRadiusPx + expand2 * 0.85f).coerceAtLeast(0f)
+                drawRoundRect(
+                    color = toneB.copy(alpha = (0.64f * f2).coerceIn(0f, 1f)),
+                    topLeft = Offset(-expand2, -expand2),
+                    size = Size(size.width + expand2 * 2f, size.height + expand2 * 2f),
+                    cornerRadius = CornerRadius(c2, c2),
+                    style = Stroke(width = (1.6f * (1f - 0.5f * e2)).dp.toPx())
                 )
             }
+        }
 
-            // 2. 14 curved comet-tail sparks + secondary embers
-            val headBaseR = (if (isAccentKey) 3.4f else 2.9f).dp.toPx() * (1f - 0.45f * progress)
-            val tailFactor = (0.28f + 0.18f * (1f - progress))
-            val gravityPx = 11.dp.toPx() * progress * progress
-            val liftPx = 9.dp.toPx() * progress
+        ExpressiveTouchStyle.FLOWER_MORPH -> {
+            // Iconic Material 3 Expressive 8-lobe Scalloped Cookie blooming smoothly BEHIND the keycap
+            val targetR = maxOf(minDim * 0.72f, maxDim * 0.54f) + 8.dp.toPx()
+            val flowerR = targetR * (0.58f + 0.42f * ease)
+            val rot = progress * 0.45f
+            val rCos = cos(rot)
+            val rSin = sin(rot)
 
-            for (i in 0 until SPARK_COUNT) {
-                val speed = SPARK_SPEED[i]
-                val dist = maxDist * ease * speed
-                val curl = SPARK_CURL[i] * 5.5.dp.toPx() * progress * (1f - 0.35f * progress)
-                val cosA = SPARK_COS[i]
-                val sinA = SPARK_SIN[i]
-                // Perpendicular curl (-sinA, cosA) gives dynamic curved plasma trails
-                val sx = cx + cosA * dist - sinA * curl
-                val sy = cy + sinA * dist + cosA * curl + gravityPx - liftPx
+            reusablePath.reset()
+            for (i in 0 until FLOWER_PTS) {
+                val fx = FLOWER_X[i] * flowerR
+                val fy = FLOWER_Y[i] * flowerR
+                val px = bx + fx * rCos - fy * rSin
+                val py = by + fx * rSin + fy * rCos
+                if (i == 0) reusablePath.moveTo(px, py) else reusablePath.lineTo(px, py)
+            }
+            reusablePath.close()
 
-                val tailDist = dist * (1f - tailFactor).coerceAtLeast(0.12f)
-                val tailCurl = curl * 0.55f
-                val tx = cx + cosA * tailDist - sinA * tailCurl
-                val ty = cy + sinA * tailDist + cosA * tailCurl + gravityPx * 0.5f - liftPx * 0.7f
-
-                val col = when (i % 3) {
-                    0 -> hotCyan
-                    1 -> goldColor
-                    else -> warmAccent
-                }
-                val pFade = fade * (0.76f + 0.24f * abs(((progress * 4f + i * 0.19f) % 1f) * 2f - 1f))
-                drawLine(
-                    color = col.copy(alpha = (0.86f * pFade).coerceIn(0f, 1f)),
-                    start = Offset(tx, ty),
-                    end = Offset(sx, sy),
-                    strokeWidth = (headBaseR * 0.92f).coerceAtLeast(1.4f),
-                    cap = StrokeCap.Round
+            drawBlurredGlowPath(
+                cache = glowCache,
+                path = reusablePath,
+                color = toneA,
+                alpha = (0.46f * fade).coerceIn(0f, 1f),
+                blurRadiusPx = 11.dp.toPx()
+            )
+            drawPath(
+                path = reusablePath,
+                brush = Brush.radialGradient(
+                    0.0f to toneA.copy(alpha = (0.34f * fade).coerceIn(0f, 1f)),
+                    0.75f to toneB.copy(alpha = (0.26f * fade).coerceIn(0f, 1f)),
+                    1.0f to toneA.copy(alpha = (0.14f * fade).coerceIn(0f, 1f)),
+                    center = Offset(bx, by),
+                    radius = flowerR
                 )
-                drawCircle(
-                    color = col.copy(alpha = (0.34f * pFade).coerceIn(0f, 1f)),
-                    radius = headBaseR * 2.2f,
-                    center = Offset(sx, sy)
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = (0.96f * pFade).coerceIn(0f, 1f)),
-                    radius = headBaseR * 0.78f,
-                    center = Offset(sx, sy)
-                )
-                if (i % 2 == 0) {
-                    val eDist = dist * 0.62f
-                    val ex = cx + cosA * eDist + sinA * curl * 0.6f
-                    val ey = cy + sinA * eDist - cosA * curl * 0.6f + gravityPx * 0.6f
+            )
+            drawPath(
+                path = reusablePath,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        toneA.copy(alpha = (0.86f * fade).coerceIn(0f, 1f)),
+                        toneB.copy(alpha = (0.80f * fade).coerceIn(0f, 1f))
+                    ),
+                    start = Offset(bx - flowerR, by - flowerR),
+                    end = Offset(bx + flowerR, by + flowerR)
+                ),
+                style = Stroke(width = (2.2f - 1.0f * ease).dp.toPx())
+            )
+        }
+
+        ExpressiveTouchStyle.SPRING_WAVE -> {
+            // Outer Gaussian-soft concentric tonal shockwaves framing the key
+            val baseR = maxDim * 0.50f
+            for (w in 0..1) {
+                val delay = w * 0.16f
+                if (progress > delay) {
+                    val wp = ((progress - delay) / (1f - delay)).coerceIn(0f, 1f)
+                    val wEase = 1f - (1f - wp).pow(2.3f)
+                    val wFade = (1f - wp).pow(1.4f)
+                    val ringR = baseR * 0.72f + (baseR * 0.48f + (if (isAccentKey) 18f else 14f).dp.toPx()) * wEase
+                    val col = if (w == 0) toneA else toneB
+                    val sw = (2.6f - 0.5f * w - 1.4f * wEase).coerceAtLeast(0.75f).dp.toPx()
+                    if (w == 0) {
+                        drawCircle(
+                            color = col.copy(alpha = (0.20f * wFade).coerceIn(0f, 1f)),
+                            radius = ringR,
+                            center = Offset(bx, by),
+                            style = Stroke(width = sw * 3.2f)
+                        )
+                    }
                     drawCircle(
-                        color = goldColor.copy(alpha = (0.72f * pFade).coerceIn(0f, 1f)),
-                        radius = headBaseR * 0.48f,
-                        center = Offset(ex, ey)
+                        color = col.copy(alpha = ((0.82f - 0.16f * w) * wFade).coerceIn(0f, 1f)),
+                        radius = ringR,
+                        center = Offset(bx, by),
+                        style = Stroke(width = sw)
                     )
                 }
             }
         }
-        PressSparkStyle.STARLIGHT -> {
-            // 1. Expanding celestial shimmer halo
-            if (progress < 0.48f) {
-                val haloFade = (1f - progress / 0.48f).pow(1.4f)
-                val haloR = (8.dp.toPx() + maxDist * 0.55f * ease).coerceAtLeast(2f)
-                drawCircle(
-                    color = goldColor.copy(alpha = 0.28f * haloFade),
-                    radius = haloR,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = 1.6.dp.toPx())
-                )
-            }
 
-            // 2. 10 rotating & twinkling 4-point sparkles + dust orbs
-            val baseStarR = (if (isAccentKey) 7.4f else 6.2f).dp.toPx() * (0.72f + 0.45f * (1f - progress))
-            for (i in 0 until 10) {
-                val idx = (i * SPARK_COUNT) / 10
-                val dist = maxDist * 0.92f * ease * (0.58f + 0.42f * ((i % 3) / 2f))
-                val sx = cx + SPARK_COS[idx] * dist
-                val sy = cy + SPARK_SIN[idx] * dist - (10.dp.toPx() * progress)
-                val starColor = when (i % 3) {
-                    0 -> Color.White
-                    1 -> goldColor
-                    else -> hotCyan
+        ExpressiveTouchStyle.CAPSULE_BURST -> {
+            // 10 sleek Material Expressive rounded pills emerging cleanly past the keycap perimeter
+            val lengthBell = sin(progress * PI.toFloat()).coerceIn(0f, 1f)
+            val longLen = (4.0f + 11.5f * lengthBell).dp.toPx()
+            val shortLen = (3.0f + 8.0f * lengthBell).dp.toPx()
+            val primaryW = (4.6f * (1f - 0.48f * progress)).coerceAtLeast(1.6f).dp.toPx()
+            val secondaryW = (3.4f * (1f - 0.48f * progress)).coerceAtLeast(1.3f).dp.toPx()
+            val halfW = size.width * 0.5f
+            val halfH = size.height * 0.5f
+            val centerX = size.width * 0.5f
+            val centerY = size.height * 0.5f
+
+            for (i in 0 until CAPSULE_COUNT) {
+                val cosA = CAPSULE_COS[i]
+                val sinA = CAPSULE_SIN[i]
+                // Distance from button center to elliptical perimeter along angle so pills shoot FROM edge outward
+                val perimeterR = 1f / kotlin.math.hypot(cosA / halfW, sinA / halfH).coerceAtLeast(0.001f)
+                val travel = (18f + if (isAccentKey) 5f else 0f).dp.toPx() * ease *
+                    (if (i % 2 == 0) 1.0f else 0.78f)
+                val dist = perimeterR * 0.86f + travel
+                val len = if (i % 2 == 0) longLen else shortLen
+                val width = if (i % 2 == 0) primaryW else secondaryW
+
+                val x2 = centerX + cosA * dist
+                val y2 = centerY + sinA * dist
+                val x1 = x2 - cosA * len
+                val y1 = y2 - sinA * len
+
+                val capCol = when (i % 3) {
+                    0 -> toneA
+                    1 -> toneB
+                    else -> toneC
                 }
-                val twinkle = 0.55f + 0.45f * abs(((progress * 2.8f + i * 0.23f) % 1f) * 2f - 1f)
-                val alpha = (fade * twinkle).coerceIn(0f, 1f)
-                val r = baseStarR * (if (i % 2 == 0) 1.0f else 0.72f) * (0.75f + 0.35f * twinkle)
-                val inner = r * 0.28f
 
-                // Smooth rotation without Canvas matrix push/pop
-                val rot = (if (i % 2 == 0) 1f else -1f) * (progress * 2.2f + i * 0.4f)
-                val rCos = cos(rot)
-                val rSin = sin(rot)
-
-                starPath.reset()
-                starPath.moveTo(sx - r * rSin, sy - r * rCos)
-                starPath.lineTo(sx + inner * rCos - (-inner) * rSin, sy + inner * rSin + (-inner) * rCos)
-                starPath.lineTo(sx + r * rCos, sy + r * rSin)
-                starPath.lineTo(sx + inner * rCos - inner * rSin, sy + inner * rSin + inner * rCos)
-                starPath.lineTo(sx + r * rSin, sy + r * rCos)
-                starPath.lineTo(sx - inner * rCos - inner * rSin, sy - inner * rSin + inner * rCos)
-                starPath.lineTo(sx - r * rCos, sy - r * rSin)
-                starPath.lineTo(sx - inner * rCos - (-inner) * rSin, sy - inner * rSin + (-inner) * rCos)
-                starPath.close()
-
-                drawCircle(
-                    color = starColor.copy(alpha = (0.34f * alpha).coerceIn(0f, 1f)),
-                    radius = r * 1.45f,
-                    center = Offset(sx, sy)
+                drawLine(
+                    color = capCol.copy(alpha = (0.26f * fade).coerceIn(0f, 1f)),
+                    start = Offset(x1, y1),
+                    end = Offset(x2, y2),
+                    strokeWidth = width * 2.2f,
+                    cap = StrokeCap.Round
                 )
-                drawPath(
-                    path = starPath,
-                    color = starColor.copy(alpha = (0.98f * alpha).coerceIn(0f, 1f))
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = (0.95f * alpha).coerceIn(0f, 1f)),
-                    radius = r * 0.24f,
-                    center = Offset(sx, sy)
-                )
-
-                // Trailing stardust orb
-                val dustD = dist * 0.56f
-                val dx = cx + SPARK_COS[(idx + 1) % SPARK_COUNT] * dustD
-                val dy = cy + SPARK_SIN[(idx + 1) % SPARK_COUNT] * dustD - (6.dp.toPx() * progress)
-                drawCircle(
-                    color = goldColor.copy(alpha = (0.75f * alpha).coerceIn(0f, 1f)),
-                    radius = 1.8.dp.toPx() * (1f - 0.4f * progress),
-                    center = Offset(dx, dy)
+                drawLine(
+                    color = capCol.copy(alpha = (0.92f * fade).coerceIn(0f, 1f)),
+                    start = Offset(x1, y1),
+                    end = Offset(x2, y2),
+                    strokeWidth = width,
+                    cap = StrokeCap.Round
                 )
             }
         }
-        PressSparkStyle.FIREWORK -> {
-            // Stage 1: Crisp launch shockwave ring
-            val ringProgress = (progress / 0.68f).coerceIn(0f, 1f)
-            if (ringProgress < 0.99f) {
-                val ringAlpha = (1f - ringProgress).pow(1.6f) * 0.56f
-                val ringRadius = (8.dp.toPx() + maxDist * 0.85f * (1f - (1f - ringProgress).pow(2f))).coerceAtLeast(2f)
-                drawCircle(
-                    color = goldColor.copy(alpha = ringAlpha),
-                    radius = ringRadius,
-                    center = Offset(cx, cy),
-                    style = Stroke(width = (2.6f * (1f - 0.6f * ringProgress)).dp.toPx())
-                )
+
+        ExpressiveTouchStyle.CLOVER_BLOOM -> {
+            // Material 3 Expressive 4-leaf puffy Clover + counter-rotated tertiary echo behind keycap
+            val targetR = maxOf(minDim * 0.74f, maxDim * 0.56f) + 9.dp.toPx()
+            val outerR = targetR * (0.56f + 0.44f * ease)
+            val rot = progress * 0.58f
+            val rCos = cos(rot)
+            val rSin = sin(rot)
+
+            reusablePath.reset()
+            for (i in 0 until CLOVER_PTS) {
+                val px0 = CLOVER_X[i] * outerR
+                val py0 = CLOVER_Y[i] * outerR
+                val px = bx + px0 * rCos - py0 * rSin
+                val py = by + px0 * rSin + py0 * rCos
+                if (i == 0) reusablePath.moveTo(px, py) else reusablePath.lineTo(px, py)
             }
+            reusablePath.close()
 
-            // Stage 2: 12 willow main shells with gravity droop + 24 cascading sub-embers
-            val gravity = 20.dp.toPx() * progress * progress
-            val shellR = (if (isAccentKey) 3.4f else 2.8f).dp.toPx() * (1f - 0.42f * progress)
-            val bloomStart = 0.20f
-            val subEase = if (progress > bloomStart) {
-                val subP = ((progress - bloomStart) / (1f - bloomStart)).coerceIn(0f, 1f)
-                1f - (1f - subP).pow(1.9f)
-            } else {
-                0f
+            drawBlurredGlowPath(
+                cache = glowCache,
+                path = reusablePath,
+                color = toneA,
+                alpha = (0.44f * fade).coerceIn(0f, 1f),
+                blurRadiusPx = 11.dp.toPx()
+            )
+            drawPath(
+                path = reusablePath,
+                brush = Brush.radialGradient(
+                    0.0f to toneA.copy(alpha = (0.34f * fade).coerceIn(0f, 1f)),
+                    0.75f to toneB.copy(alpha = (0.22f * fade).coerceIn(0f, 1f)),
+                    1.0f to toneA.copy(alpha = (0.10f * fade).coerceIn(0f, 1f)),
+                    center = Offset(bx, by),
+                    radius = outerR
+                )
+            )
+            drawPath(
+                path = reusablePath,
+                color = toneA.copy(alpha = (0.88f * fade).coerceIn(0f, 1f)),
+                style = Stroke(width = (2.1f - 0.9f * ease).dp.toPx())
+            )
+
+            // Offset 45-deg soft tertiary silhouette for rich dual-layer Material depth
+            val echoR = outerR * 0.86f
+            val eRot = rot + (PI.toFloat() / 4f) - progress * 0.20f
+            val eCos = cos(eRot)
+            val eSin = sin(eRot)
+            reusablePath.reset()
+            for (i in 0 until CLOVER_PTS) {
+                val px0 = CLOVER_X[i] * echoR
+                val py0 = CLOVER_Y[i] * echoR
+                val px = bx + px0 * eCos - py0 * eSin
+                val py = by + px0 * eSin + py0 * eCos
+                if (i == 0) reusablePath.moveTo(px, py) else reusablePath.lineTo(px, py)
             }
+            reusablePath.close()
+            drawPath(
+                path = reusablePath,
+                color = toneB.copy(alpha = (0.58f * fade).coerceIn(0f, 1f)),
+                style = Stroke(width = 1.5.dp.toPx())
+            )
+        }
 
-            for (i in 0 until FW_COUNT) {
-                val d1 = maxDist * 0.98f * ease * (0.78f + 0.22f * (i % 2))
-                val sx = cx + FW_COS[i] * d1
-                val sy = cy + FW_SIN[i] * d1 + gravity - (7.dp.toPx() * progress)
-                val tx = cx + FW_COS[i] * (d1 * 0.72f)
-                val ty = cy + FW_SIN[i] * (d1 * 0.72f) + gravity * 0.55f - (5.dp.toPx() * progress)
+        ExpressiveTouchStyle.PRISM_SHIMMER -> {
+            // Soft outer chromatic prism rim & diffused halo around the keycap
+            val rimExpand = (if (isAccentKey) 8.5f else 6.8f).dp.toPx() * ease
+            val rimCorner = (cornerRadiusPx + rimExpand * 0.85f).coerceAtLeast(0f)
+            val rimStroke = (2.4f - 1.4f * ease).coerceAtLeast(0.8f).dp.toPx()
 
-                val col = when (i % 4) {
-                    0 -> hotCyan
-                    1 -> warmAccent
-                    2 -> goldColor
-                    else -> Color.White
-                }
-
-                // Glowing willow trail + shell core
-                drawLine(
-                    color = col.copy(alpha = (0.78f * fade).coerceIn(0f, 1f)),
-                    start = Offset(tx, ty),
-                    end = Offset(sx, sy),
-                    strokeWidth = (shellR * 0.85f).coerceAtLeast(1.2f),
-                    cap = StrokeCap.Round
-                )
-                drawCircle(
-                    color = col.copy(alpha = (0.36f * fade).coerceIn(0f, 1f)),
-                    radius = shellR * 2.1f,
-                    center = Offset(sx, sy)
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = (0.96f * fade).coerceIn(0f, 1f)),
-                    radius = shellR * 0.85f,
-                    center = Offset(sx, sy)
-                )
-
-                // Cascading secondary burst sparks splitting off each shell
-                if (subEase > 0.01f) {
-                    val subDist = maxDist * 0.34f * subEase
-                    val subGravity = 12.dp.toPx() * subEase * subEase
-                    val subFade = (fade * (1f - subEase * 0.28f)).coerceIn(0f, 1f)
-                    for (branch in 0..1) {
-                        val bIdx = i * 2 + branch
-                        val bx = sx + FW_SUB_COS[bIdx] * subDist
-                        val by = sy + FW_SUB_SIN[bIdx] * subDist + subGravity
-                        val subCol = if (branch == 0) goldColor else col
-                        drawLine(
-                            color = subCol.copy(alpha = (0.68f * subFade).coerceIn(0f, 1f)),
-                            start = Offset(sx, sy),
-                            end = Offset(bx, by),
-                            strokeWidth = (shellR * 0.52f).coerceAtLeast(1f),
-                            cap = StrokeCap.Round
-                        )
-                        drawCircle(
-                            color = Color.White.copy(alpha = (0.90f * subFade).coerceIn(0f, 1f)),
-                            radius = shellR * 0.52f,
-                            center = Offset(bx, by)
-                        )
-                    }
-                }
-            }
+            drawSmoothBacklight(
+                cache = glowCache,
+                color = toneB,
+                alpha = (0.36f * fade).coerceIn(0f, 1f),
+                expandPx = rimExpand * 0.35f,
+                blurRadiusPx = (8f + 6f * ease).dp.toPx(),
+                cornerRadiusPx = cornerRadiusPx
+            )
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        toneA.copy(alpha = (0.90f * fade).coerceIn(0f, 1f)),
+                        toneB.copy(alpha = (0.86f * fade).coerceIn(0f, 1f)),
+                        toneC.copy(alpha = (0.82f * fade).coerceIn(0f, 1f))
+                    ),
+                    start = Offset(-rimExpand, 0f),
+                    end = Offset(size.width + rimExpand, size.height)
+                ),
+                topLeft = Offset(-rimExpand, -rimExpand),
+                size = Size(size.width + rimExpand * 2f, size.height + rimExpand * 2f),
+                cornerRadius = CornerRadius(rimCorner, rimCorner),
+                style = Stroke(width = rimStroke)
+            )
         }
     }
 }
+
+/**
+ * Pass 2 (drawn inside the clipped keycap surface, underneath the digit/operator text):
+ * Smooth tonal washes, directional ripples, and glass specular sweeps so the keycap
+ * responds directly to finger contact without obscuring typography.
+ */
+private fun DrawScope.drawExpressiveInnerEffect(
+    progress: Float,
+    cx: Float,
+    cy: Float,
+    style: ExpressiveTouchStyle,
+    primaryTint: Color,
+    tertiaryTint: Color,
+    onPrimaryTint: Color,
+    isDarkTheme: Boolean,
+    isSolidPrimaryKey: Boolean
+) {
+    val ease = 1f - (1f - progress).pow(2.45f)
+    val fade = (1f - progress).pow(1.3f)
+    val maxR = (maxOf(size.width, size.height) * 0.95f).coerceAtLeast(36.dp.toPx())
+
+    val toneA = if (isDarkTheme) lerp(primaryTint, Color.White, 0.32f) else primaryTint
+    val toneB = if (isDarkTheme) lerp(tertiaryTint, Color.White, 0.28f) else tertiaryTint
+    val surfaceAccent = if (isSolidPrimaryKey) {
+        onPrimaryTint
+    } else if (isDarkTheme) {
+        lerp(primaryTint, Color.White, 0.56f)
+    } else {
+        primaryTint
+    }
+
+    when (style) {
+        ExpressiveTouchStyle.PRISM_SHIMMER -> {
+            val span = size.width + size.height
+            val sweepCenter = -size.height * 0.35f + (span + size.height * 0.7f) * ease
+            val bandHalf = (size.width * 0.44f).coerceAtLeast(26.dp.toPx())
+            val sheenAlpha = (sin(progress * PI.toFloat()).coerceIn(0f, 1f) * 0.55f +
+                (1f - progress) * 0.22f).coerceIn(0f, 0.70f)
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        toneA.copy(alpha = sheenAlpha * 0.38f),
+                        surfaceAccent.copy(alpha = sheenAlpha * 0.72f),
+                        toneB.copy(alpha = sheenAlpha * 0.38f),
+                        Color.Transparent
+                    ),
+                    start = Offset(sweepCenter - bandHalf, 0f),
+                    end = Offset(sweepCenter + bandHalf, size.height)
+                )
+            )
+        }
+        ExpressiveTouchStyle.SPRING_WAVE -> {
+            val washR = (10.dp.toPx() + maxR * 1.15f * ease).coerceAtLeast(2f)
+            val alpha = (0.38f * fade).coerceIn(0f, 1f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to toneA.copy(alpha = alpha * 0.25f),
+                    0.58f to surfaceAccent.copy(alpha = alpha * 0.95f),
+                    0.78f to toneB.copy(alpha = alpha * 0.55f),
+                    1.0f to Color.Transparent,
+                    center = Offset(cx, cy),
+                    radius = washR
+                ),
+                center = Offset(cx, cy),
+                radius = washR
+            )
+        }
+        else -> {
+            // Unified Material Expressive radial contact highlight beneath the key label
+            val bloomR = (10.dp.toPx() + maxR * 0.95f * ease).coerceAtLeast(2f)
+            val bloomAlpha = (0.32f * fade).coerceIn(0f, 1f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to surfaceAccent.copy(alpha = bloomAlpha),
+                    0.55f to toneB.copy(alpha = bloomAlpha * 0.40f),
+                    1.0f to Color.Transparent,
+                    center = Offset(cx, cy),
+                    radius = bloomR
+                ),
+                center = Offset(cx, cy),
+                radius = bloomR
+            )
+        }
+    }
+}
+
+
 

@@ -146,6 +146,7 @@ import com.example.R
 import com.example.audio.CalcSoundType
 import com.example.data.local.CalculationRecord
 import com.example.data.preferences.DisplayGlowStyle
+import com.example.data.preferences.GlowColorPreset
 import com.example.data.preferences.ResultAnimStyle
 import com.example.domain.math.MathErrorType
 import com.example.ui.CalculatorUiState
@@ -364,9 +365,14 @@ fun CalculatorDisplay(
     }
 
     val surfaceContainerColor = MaterialTheme.colorScheme.surfaceContainer
+    val screenBackgroundColor = MaterialTheme.colorScheme.background
     val errorAccentColor = MaterialTheme.colorScheme.error
     val isDarkDisplaySurface = surfaceContainerColor.luminance() < 0.5f
-    val displayGlowOverrideColor = state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
+    val displayGlowOverrideColor = when (state.displayGlowColorPreset) {
+        GlowColorPreset.AUTO -> null
+        GlowColorPreset.CUSTOM -> Color(state.displayGlowCustomArgb.toInt())
+        else -> state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
+    }
     val ambientPrimaryColor = displayGlowOverrideColor ?: MaterialTheme.colorScheme.primary
     val ambientTertiaryColor = displayGlowOverrideColor?.let {
         lerp(it, MaterialTheme.colorScheme.tertiary, 0.42f)
@@ -466,14 +472,15 @@ fun CalculatorDisplay(
                         when (state.displayGlowStyle) {
                             DisplayGlowStyle.AURORA -> {
                                 val c1 = Offset(
-                                    x = size.width * (0.18f + 0.22f * ambientDrift),
-                                    y = visibleBottom * (0.24f + 0.18f * (1f - ambientDrift))
+                                    x = size.width * (0.20f + 0.22f * ambientDrift),
+                                    y = visibleBottom * (0.20f + 0.14f * (1f - ambientDrift))
                                 )
-                                val r1 = maxOf(size.width, visibleBottom) * 0.72f * (0.94f + 0.06f * breathMul)
+                                val r1 = maxOf(size.width, visibleBottom) * 0.68f * (0.95f + 0.05f * breathMul)
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0.0f to ambientPrimaryColor.copy(alpha = (0.30f * intensity).coerceIn(0f, 0.65f)),
-                                        0.48f to ambientPrimaryColor.copy(alpha = (0.13f * intensity).coerceIn(0f, 0.34f)),
+                                        0.44f to ambientPrimaryColor.copy(alpha = (0.14f * intensity).coerceIn(0f, 0.34f)),
+                                        0.76f to ambientPrimaryColor.copy(alpha = (0.04f * intensity).coerceIn(0f, 0.12f)),
                                         1.0f to Color.Transparent,
                                         center = c1,
                                         radius = r1
@@ -483,14 +490,15 @@ fun CalculatorDisplay(
                                 )
 
                                 val c2 = Offset(
-                                    x = size.width * (0.84f - 0.18f * ambientDrift),
-                                    y = visibleBottom * (0.76f - 0.14f * ambientDrift)
+                                    x = size.width * (0.82f - 0.18f * ambientDrift),
+                                    y = visibleBottom * (0.50f - 0.10f * ambientDrift)
                                 )
-                                val r2 = maxOf(size.width, visibleBottom) * 0.66f * (0.94f + 0.06f * breathMul)
+                                val r2 = maxOf(size.width, visibleBottom) * 0.60f * (0.95f + 0.05f * breathMul)
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0.0f to ambientTertiaryColor.copy(alpha = (0.26f * intensity).coerceIn(0f, 0.58f)),
-                                        0.52f to ambientTertiaryColor.copy(alpha = (0.11f * intensity).coerceIn(0f, 0.28f)),
+                                        0.48f to ambientTertiaryColor.copy(alpha = (0.11f * intensity).coerceIn(0f, 0.28f)),
+                                        0.80f to ambientTertiaryColor.copy(alpha = (0.03f * intensity).coerceIn(0f, 0.10f)),
                                         1.0f to Color.Transparent,
                                         center = c2,
                                         radius = r2
@@ -501,27 +509,50 @@ fun CalculatorDisplay(
 
                                 drawRect(
                                     brush = Brush.verticalGradient(
-                                        0.55f to Color.Transparent,
-                                        1.0f to ambientPrimaryColor.copy(alpha = (0.14f * intensity).coerceIn(0f, 0.34f))
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.05f * intensity).coerceIn(0f, 0.15f)),
+                                        0.48f to ambientTertiaryColor.copy(alpha = (0.09f * intensity).coerceIn(0f, 0.24f)),
+                                        0.86f to Color.Transparent
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+
+                                // Seamless bottom dissolve into screen background so glow never cuts abruptly
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.56f to Color.Transparent,
+                                        0.76f to screenBackgroundColor.copy(alpha = 0.44f),
+                                        0.90f to screenBackgroundColor.copy(alpha = 0.85f),
+                                        1.0f to screenBackgroundColor
                                     ),
                                     size = Size(size.width, visibleBottom)
                                 )
                             }
 
                             DisplayGlowStyle.NEON_FRAME -> {
-                                val cornerPx = 32.dp.toPx()
-                                val softWashAlpha = (0.18f * intensity).coerceIn(0f, 0.44f)
+                                val cornerPx = 30.dp.toPx()
+                                val softWashAlpha = (0.15f * intensity).coerceIn(0f, 0.36f)
                                 drawRect(
                                     brush = Brush.verticalGradient(
-                                        0.35f to Color.Transparent,
-                                        1.0f to ambientPrimaryColor.copy(alpha = softWashAlpha)
+                                        0.20f to Color.Transparent,
+                                        0.58f to ambientPrimaryColor.copy(alpha = softWashAlpha),
+                                        0.86f to ambientTertiaryColor.copy(alpha = softWashAlpha * 0.45f),
+                                        1.0f to Color.Transparent
                                     ),
                                     size = Size(size.width, visibleBottom)
                                 )
 
-                                val outerStrokePx = 5.5.dp.toPx()
-                                val innerStrokePx = 1.75.dp.toPx()
-                                val inset = innerStrokePx / 2f
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.64f to Color.Transparent,
+                                        0.86f to screenBackgroundColor.copy(alpha = 0.46f),
+                                        1.0f to screenBackgroundColor.copy(alpha = 0.82f)
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+
+                                val outerStrokePx = 5.0.dp.toPx()
+                                val innerStrokePx = 1.6.dp.toPx()
+                                val inset = 3.5.dp.toPx()
                                 ambientBorderPath.reset()
                                 ambientBorderPath.addRoundRect(
                                     RoundRect(
@@ -531,8 +562,14 @@ fun CalculatorDisplay(
                                         bottom = visibleBottom - inset,
                                         topLeftCornerRadius = CornerRadius.Zero,
                                         topRightCornerRadius = CornerRadius.Zero,
-                                        bottomLeftCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset),
-                                        bottomRightCornerRadius = CornerRadius(cornerPx - inset, cornerPx - inset)
+                                        bottomLeftCornerRadius = CornerRadius(
+                                            (cornerPx - inset).coerceAtLeast(0f),
+                                            (cornerPx - inset).coerceAtLeast(0f)
+                                        ),
+                                        bottomRightCornerRadius = CornerRadius(
+                                            (cornerPx - inset).coerceAtLeast(0f),
+                                            (cornerPx - inset).coerceAtLeast(0f)
+                                        )
                                     )
                                 )
                                 val frameBrush = Brush.horizontalGradient(
@@ -547,13 +584,13 @@ fun CalculatorDisplay(
                                 drawPath(
                                     path = ambientBorderPath,
                                     brush = frameBrush,
-                                    alpha = 0.28f,
+                                    alpha = 0.24f,
                                     style = Stroke(width = outerStrokePx)
                                 )
                                 drawPath(
                                     path = ambientBorderPath,
                                     brush = frameBrush,
-                                    alpha = 0.85f,
+                                    alpha = 0.78f,
                                     style = Stroke(width = innerStrokePx)
                                 )
                             }
@@ -561,14 +598,14 @@ fun CalculatorDisplay(
                             DisplayGlowStyle.BOTTOM_HORIZON -> {
                                 val horizonCenter = Offset(
                                     x = size.width * (0.36f + 0.28f * ambientDrift),
-                                    y = visibleBottom * 0.96f
+                                    y = visibleBottom * 0.66f
                                 )
-                                val horizonRadius = maxOf(size.width * 0.88f, visibleBottom * 0.85f)
+                                val horizonRadius = maxOf(size.width * 0.84f, visibleBottom * 0.64f)
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        0.0f to ambientPrimaryColor.copy(alpha = (0.42f * intensity).coerceIn(0f, 0.78f)),
-                                        0.42f to ambientTertiaryColor.copy(alpha = (0.22f * intensity).coerceIn(0f, 0.45f)),
-                                        0.78f to ambientPrimaryColor.copy(alpha = (0.06f * intensity).coerceIn(0f, 0.16f)),
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.38f * intensity).coerceIn(0f, 0.74f)),
+                                        0.42f to ambientTertiaryColor.copy(alpha = (0.20f * intensity).coerceIn(0f, 0.42f)),
+                                        0.76f to ambientPrimaryColor.copy(alpha = (0.05f * intensity).coerceIn(0f, 0.14f)),
                                         1.0f to Color.Transparent,
                                         center = horizonCenter,
                                         radius = horizonRadius
@@ -578,9 +615,20 @@ fun CalculatorDisplay(
                                 )
                                 drawRect(
                                     brush = Brush.verticalGradient(
-                                        0.42f to Color.Transparent,
-                                        0.86f to ambientPrimaryColor.copy(alpha = (0.16f * intensity).coerceIn(0f, 0.36f)),
-                                        1.0f to ambientTertiaryColor.copy(alpha = (0.32f * intensity).coerceIn(0f, 0.62f))
+                                        0.20f to Color.Transparent,
+                                        0.52f to ambientPrimaryColor.copy(alpha = (0.15f * intensity).coerceIn(0f, 0.34f)),
+                                        0.68f to ambientTertiaryColor.copy(alpha = (0.25f * intensity).coerceIn(0f, 0.50f)),
+                                        0.88f to ambientPrimaryColor.copy(alpha = (0.06f * intensity).coerceIn(0f, 0.16f)),
+                                        1.0f to Color.Transparent
+                                    ),
+                                    size = Size(size.width, visibleBottom)
+                                )
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.60f to Color.Transparent,
+                                        0.79f to screenBackgroundColor.copy(alpha = 0.48f),
+                                        0.92f to screenBackgroundColor.copy(alpha = 0.88f),
+                                        1.0f to screenBackgroundColor
                                     ),
                                     size = Size(size.width, visibleBottom)
                                 )

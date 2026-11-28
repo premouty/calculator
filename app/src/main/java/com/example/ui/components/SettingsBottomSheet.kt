@@ -10,6 +10,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -42,10 +44,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
@@ -80,8 +82,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -98,6 +100,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -107,9 +111,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -125,16 +126,19 @@ import com.example.data.preferences.ButtonShapeStyle
 import com.example.data.preferences.DisplayGlowStyle
 import com.example.data.preferences.DynamicColorSource
 import com.example.data.preferences.DynamicColorVibrancy
+import com.example.data.preferences.ExpressiveTouchStyle
 import com.example.data.preferences.GlowColorPreset
 import com.example.data.preferences.GlowTarget
-import com.example.data.preferences.PressSparkStyle
 import com.example.data.preferences.ResultAnimStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.theme.DEFAULT_CUSTOM_ACCENT_ARGB
 import com.example.ui.theme.ThemeMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 private val ACCENT_PRESETS: List<Long> = listOf(
     DEFAULT_CUSTOM_ACCENT_ARGB, // Indigo (default)
@@ -149,8 +153,10 @@ private val ACCENT_PRESETS: List<Long> = listOf(
 @Composable
 fun SettingsBottomSheet(
     state: CalculatorUiState,
+    initialScrollIndex: Int = 0,
+    initialScrollOffset: Int = 0,
     onDismiss: () -> Unit,
-    onSaveScrollPosition: (Int) -> Unit,
+    onSaveScrollPosition: (Int, Int) -> Unit,
     onToggleVibrationExpanded: (Boolean) -> Unit,
     onToggleSound: () -> Unit,
     onChangeSoundVolume: (Float) -> Unit,
@@ -175,49 +181,59 @@ fun SettingsBottomSheet(
     onChangeGlowIntensity: (Float) -> Unit,
     onSelectResultAnimStyle: (ResultAnimStyle) -> Unit,
     onTogglePressSparks: (Boolean) -> Unit,
-    onSelectPressSparkStyle: (PressSparkStyle) -> Unit,
+    onSelectExpressiveTouchStyle: (ExpressiveTouchStyle) -> Unit,
     onToggleGlowBreathing: (Boolean) -> Unit,
     onToggleLivePreview: (Boolean) -> Unit,
     onToggleAmbientDisplayGlow: (Boolean) -> Unit,
     onSelectDisplayGlowStyle: (DisplayGlowStyle) -> Unit,
     onChangeDisplayGlowIntensity: (Float) -> Unit,
     onSelectDisplayGlowColorPreset: (GlowColorPreset) -> Unit,
+    onSelectDisplayGlowCustomArgb: (Long) -> Unit,
     onResetDefaults: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scrollState = rememberScrollState(initial = state.settingsScrollPosition)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialScrollIndex,
+        initialFirstVisibleItemScrollOffset = initialScrollOffset
+    )
     val scope = rememberCoroutineScope()
     val vibrationExpanded = state.settingsVibrationExpanded
 
-    LaunchedEffect(scrollState) {
-        snapshotFlow { scrollState.value }
-            .collect { position -> onSaveScrollPosition(position) }
+    // Persist scroll only when idle or closing — zero StateFlow recompositions while swiping at 120Hz
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { scrolling ->
+                if (!scrolling) {
+                    onSaveScrollPosition(
+                        listState.firstVisibleItemIndex,
+                        listState.firstVisibleItemScrollOffset
+                    )
+                }
+            }
+    }
+    DisposableEffect(listState) {
+        onDispose {
+            onSaveScrollPosition(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset
+            )
+        }
     }
 
-    // Track whether the current touch gesture began while scrolled down so fast bottom-to-top
-    // scrolls/flings never spill into ModalBottomSheet swipe-to-dismiss.
-    var gestureStartedScrolled by remember { mutableStateOf(false) }
-    val sheetScrollGuard = remember(scrollState) {
+    // Unconditionally consume leftover scroll/fling inside the scrollable list so swiping
+    // bottom-to-top in settings never spills into ModalBottomSheet swipe-to-dismiss.
+    val blockSheetSwipeOverscroll = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(
                 consumed: Offset,
                 available: Offset,
                 source: NestedScrollSource
-            ): Offset {
-                return if ((gestureStartedScrolled || source == NestedScrollSource.SideEffect) && available.y > 0f) {
-                    Offset(0f, available.y)
-                } else {
-                    Offset.Zero
-                }
-            }
+            ): Offset = if (available.y != 0f) Offset(0f, available.y) else Offset.Zero
 
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                return if (gestureStartedScrolled && available.y > 0f) {
-                    Velocity(0f, available.y)
-                } else {
-                    Velocity.Zero
-                }
-            }
+            override suspend fun onPostFling(
+                consumed: Velocity,
+                available: Velocity
+            ): Velocity = if (available.y != 0f) Velocity(0f, available.y) else Velocity.Zero
         }
     }
 
@@ -226,7 +242,9 @@ fun SettingsBottomSheet(
     var justReset by remember { mutableStateOf(false) }
 
     val isScrolled by remember {
-        derivedStateOf { scrollState.value > 6 }
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 6
+        }
     }
     val headerDividerAlphaState = animateFloatAsState(
         targetValue = if (isScrolled) 1f else 0f,
@@ -243,7 +261,7 @@ fun SettingsBottomSheet(
         modifier = Modifier.testTag("settings_modal_sheet")
     ) {
         val sheetView = LocalView.current
-        SideEffect {
+        LaunchedEffect(sheetView) {
             val dialogWindow = (sheetView.parent as? DialogWindowProvider)?.window
             if (dialogWindow != null) {
                 runCatching {
@@ -277,9 +295,7 @@ fun SettingsBottomSheet(
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
+            modifier = Modifier.fillMaxWidth()
         ) {
             // Sticky Header: stays pinned when user swipes/scrolls down through settings
             Column(
@@ -350,32 +366,27 @@ fun SettingsBottomSheet(
                 )
             }
 
-            Column(
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    end = 20.dp,
+                    top = 10.dp,
+                    bottom = 18.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
-                    .pointerInput(scrollState) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                if (event.changes.any { it.changedToDownIgnoreConsumed() }) {
-                                    gestureStartedScrolled = scrollState.value > 0
-                                }
-                            }
-                        }
-                    }
-                    .nestedScroll(sheetScrollGuard)
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 10.dp, bottom = 18.dp)
+                    .nestedScroll(blockSheetSwipeOverscroll)
                     .graphicsLayer {
                         val s = resetCardPulse.value
                         scaleX = s
                         scaleY = s
-                    },
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    }
             ) {
                 // Section 1: Sound & Haptic Feedback
+                item(key = "section_feedback") {
                 SettingsSectionCard(title = stringResource(R.string.settings_section_feedback)) {
                     SettingsSwitchRow(
                         icon = if (state.isSoundEnabled) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
@@ -604,10 +615,12 @@ fun SettingsBottomSheet(
                         }
                     }
                 }
-            }
+                }
+                }
 
-            // Section 2: Appearance & Core Preferences
-            SettingsSectionCard(title = stringResource(R.string.settings_section_appearance)) {
+                // Section 2: Appearance & Core Preferences
+                item(key = "section_appearance") {
+                SettingsSectionCard(title = stringResource(R.string.settings_section_appearance)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -804,44 +817,48 @@ fun SettingsBottomSheet(
                     onToggle = { onToggleLivePreview(!state.showLivePreview) },
                     testTag = "settings_live_preview_switch"
                 )
-            }
-
-            // Dedicated Section: Customization & Animations Hub
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
                 }
-                Text(
-                    text = stringResource(R.string.settings_section_customization_hub),
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.weight(1f)
-                )
-            }
+                }
 
-            // Hub Subsection A: Layout, Shapes & Sizes
-            SettingsSectionCard(title = stringResource(R.string.settings_subsection_layout_shape)) {
+                // Dedicated Section: Customization & Animations Hub
+                item(key = "customization_hub_header") {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.settings_section_customization_hub),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                }
+
+                // Hub Subsection A: Layout, Shapes & Sizes
+                item(key = "section_layout_shape") {
+                SettingsSectionCard(title = stringResource(R.string.settings_subsection_layout_shape)) {
                 PanelLayoutPreviewCard(state = state)
 
                 SettingsCardDivider()
@@ -910,10 +927,12 @@ fun SettingsBottomSheet(
                     onValueChange = onChangeFxScale,
                     testTag = "settings_fx_scale_slider"
                 )
-            }
+                }
+                }
 
-            // Hub Subsection B: Key Backlight & Display Glow Variations
-            SettingsSectionCard(title = stringResource(R.string.settings_subsection_glow_display)) {
+                // Hub Subsection B: Key Backlight & Display Glow Variations
+                item(key = "section_glow_display") {
+                SettingsSectionCard(title = stringResource(R.string.settings_subsection_glow_display)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1057,18 +1076,22 @@ fun SettingsBottomSheet(
 
                         SettingsCardDivider()
 
-                        GlowColorPresetSelector(
+                        DisplayGlowColorEditor(
                             title = stringResource(R.string.settings_display_glow_color_title),
                             selectedPreset = state.displayGlowColorPreset,
+                            customArgb = state.displayGlowCustomArgb,
                             onSelectPreset = onSelectDisplayGlowColorPreset,
+                            onSelectCustomArgb = onSelectDisplayGlowCustomArgb,
                             testTagPrefix = "settings_display_glow_color"
                         )
                     }
                 }
-            }
+                }
+                }
 
-            // Hub Subsection C: Animations & Effects
-            SettingsSectionCard(title = stringResource(R.string.settings_subsection_animations)) {
+                // Hub Subsection C: Animations & Effects
+                item(key = "section_animations") {
+                SettingsSectionCard(title = stringResource(R.string.settings_subsection_animations)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1104,7 +1127,7 @@ fun SettingsBottomSheet(
                 SettingsCardDivider()
 
                 SettingsSwitchRow(
-                    icon = Icons.Rounded.AutoAwesome,
+                    icon = Icons.Rounded.TouchApp,
                     title = stringResource(R.string.settings_press_sparks_title),
                     subtitle = stringResource(R.string.settings_press_sparks_subtitle),
                     checked = state.pressSparksEnabled,
@@ -1126,7 +1149,7 @@ fun SettingsBottomSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp)
-                            .padding(bottom = 10.dp),
+                            .padding(bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
@@ -1134,25 +1157,48 @@ fun SettingsBottomSheet(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        val row1 = listOf(
+                            ExpressiveTouchStyle.TONAL_HALO to stringResource(R.string.settings_press_sparks_halo),
+                            ExpressiveTouchStyle.FLOWER_MORPH to stringResource(R.string.settings_press_sparks_petal),
+                            ExpressiveTouchStyle.SPRING_WAVE to stringResource(R.string.settings_press_sparks_wave)
+                        )
+                        val row2 = listOf(
+                            ExpressiveTouchStyle.CAPSULE_BURST to stringResource(R.string.settings_press_sparks_capsules),
+                            ExpressiveTouchStyle.CLOVER_BLOOM to stringResource(R.string.settings_press_sparks_clover),
+                            ExpressiveTouchStyle.PRISM_SHIMMER to stringResource(R.string.settings_press_sparks_prism)
+                        )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val sparkOptions = listOf(
-                                PressSparkStyle.SPARKS to stringResource(R.string.settings_press_sparks_sparks),
-                                PressSparkStyle.STARLIGHT to stringResource(R.string.settings_press_sparks_starlight),
-                                PressSparkStyle.FIREWORK to stringResource(R.string.settings_press_sparks_firework)
-                            )
-                            sparkOptions.forEach { (style, label) ->
-                                SettingsChoicePill(
+                            row1.forEach { (style, label) ->
+                                ExpressiveEffectOptionTile(
+                                    style = style,
                                     label = label,
-                                    selected = state.pressSparkStyle == style,
-                                    onClick = { onSelectPressSparkStyle(style) },
+                                    selected = state.expressiveTouchStyle == style,
+                                    onClick = { onSelectExpressiveTouchStyle(style) },
                                     modifier = Modifier.weight(1f),
                                     testTag = "settings_press_spark_${style.name.lowercase()}"
                                 )
                             }
                         }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            row2.forEach { (style, label) ->
+                                ExpressiveEffectOptionTile(
+                                    style = style,
+                                    label = label,
+                                    selected = state.expressiveTouchStyle == style,
+                                    onClick = { onSelectExpressiveTouchStyle(style) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "settings_press_spark_${style.name.lowercase()}"
+                                )
+                            }
+                        }
+
+                        ExpressiveTouchPreviewStage(state = state)
                     }
                 }
 
@@ -1166,129 +1212,135 @@ fun SettingsBottomSheet(
                     onToggle = { onToggleGlowBreathing(!state.glowBreathingEnabled) },
                     testTag = "settings_glow_breathing_switch"
                 )
-            }
+                }
+                }
 
-            // Animated Reset Pill
-            val resetBg by animateColorAsState(
-                targetValue = if (justReset) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                },
-                animationSpec = tween(240),
-                label = "reset_pill_bg"
-            )
-            val resetFg by animateColorAsState(
-                targetValue = if (justReset) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                animationSpec = tween(240),
-                label = "reset_pill_fg"
-            )
+                // Animated Reset Pill
+                item(key = "section_reset") {
+                val resetBg by animateColorAsState(
+                    targetValue = if (justReset) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    animationSpec = tween(240),
+                    label = "reset_pill_bg"
+                )
+                val resetFg by animateColorAsState(
+                    targetValue = if (justReset) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    animationSpec = tween(240),
+                    label = "reset_pill_fg"
+                )
 
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = resetBg,
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (justReset) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                        } else {
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
-                        }
-                    ),
+                Box(
                     modifier = Modifier
-                        .height(42.dp)
-                        .minimumInteractiveComponentSize()
-                        .clip(CircleShape)
-                        .clickable {
-                            onResetDefaults()
-                            scope.launch {
-                                justReset = true
-                                launch {
-                                    val start = resetSpin.value
-                                    resetSpin.animateTo(
-                                        targetValue = start - 360f,
-                                        animationSpec = spring(
-                                            dampingRatio = 0.65f,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    )
-                                }
-                                launch {
-                                    resetCardPulse.animateTo(
-                                        0.985f,
-                                        tween(95, easing = CubicBezierEasing(0.2f, 0f, 0.4f, 1f))
-                                    )
-                                    resetCardPulse.animateTo(
-                                        1f,
-                                        spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                                delay(950L)
-                                justReset = false
-                            }
-                        }
-                        .testTag("settings_reset_defaults_button")
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(bottom = 6.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        AnimatedContent(
-                            targetState = justReset,
-                            transitionSpec = {
-                                (fadeIn(tween(180)) + scaleIn(initialScale = 0.6f)) togetherWith
-                                    (fadeOut(tween(120)) + scaleOut(targetScale = 0.6f))
-                            },
-                            label = "reset_icon_state"
-                        ) { resetConfirmed ->
-                            if (resetConfirmed) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    tint = resetFg,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                    Surface(
+                        shape = CircleShape,
+                        color = resetBg,
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (justReset) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
                             } else {
-                                Icon(
-                                    imageVector = Icons.Rounded.RestartAlt,
-                                    contentDescription = null,
-                                    tint = resetFg,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .graphicsLayer { rotationZ = resetSpin.value }
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                            }
+                        ),
+                        modifier = Modifier
+                            .height(42.dp)
+                            .minimumInteractiveComponentSize()
+                            .clip(CircleShape)
+                            .clickable {
+                                onResetDefaults()
+                                scope.launch {
+                                    justReset = true
+                                    launch {
+                                        val start = resetSpin.value
+                                        resetSpin.animateTo(
+                                            targetValue = start - 360f,
+                                            animationSpec = spring(
+                                                dampingRatio = 0.65f,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    }
+                                    launch {
+                                        resetCardPulse.animateTo(
+                                            0.985f,
+                                            tween(95, easing = CubicBezierEasing(0.2f, 0f, 0.4f, 1f))
+                                        )
+                                        resetCardPulse.animateTo(
+                                            1f,
+                                            spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                    delay(950L)
+                                    justReset = false
+                                }
+                            }
+                            .testTag("settings_reset_defaults_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AnimatedContent(
+                                targetState = justReset,
+                                transitionSpec = {
+                                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.6f)) togetherWith
+                                        (fadeOut(tween(120)) + scaleOut(targetScale = 0.6f))
+                                },
+                                label = "reset_icon_state"
+                            ) { resetConfirmed ->
+                                if (resetConfirmed) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = null,
+                                        tint = resetFg,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.RestartAlt,
+                                        contentDescription = null,
+                                        tint = resetFg,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .graphicsLayer { rotationZ = resetSpin.value }
+                                    )
+                                }
+                            }
+                            AnimatedContent(
+                                targetState = justReset,
+                                transitionSpec = {
+                                    fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                                },
+                                label = "reset_text_state"
+                            ) { resetConfirmed ->
+                                Text(
+                                    text = stringResource(
+                                        if (resetConfirmed) R.string.settings_reset_done else R.string.settings_reset_defaults
+                                    ),
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                    color = resetFg
                                 )
                             }
-                        }
-                        AnimatedContent(
-                            targetState = justReset,
-                            transitionSpec = {
-                                fadeIn(tween(180)) togetherWith fadeOut(tween(120))
-                            },
-                            label = "reset_text_state"
-                        ) { resetConfirmed ->
-                            Text(
-                                text = stringResource(
-                                    if (resetConfirmed) R.string.settings_reset_done else R.string.settings_reset_defaults
-                                ),
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                                color = resetFg
-                            )
                         }
                     }
                 }
-            }
+                }
             }
         }
     }
@@ -1299,33 +1351,192 @@ private fun CustomAccentColorEditor(
     selectedAccentArgb: Long,
     onSelectAccentArgb: (Long) -> Unit
 ) {
+    val isPresetColor = remember(selectedAccentArgb) {
+        ACCENT_PRESETS.any { it == selectedAccentArgb }
+    }
+    var customExpanded by remember { mutableStateOf(!isPresetColor) }
+    androidx.compose.runtime.LaunchedEffect(isPresetColor) {
+        if (!isPresetColor) {
+            customExpanded = true
+        }
+    }
+
     val activeColor = Color(selectedAccentArgb.toInt())
+    val hexLabel = remember(selectedAccentArgb) {
+        String.format("#%06X", selectedAccentArgb and 0xFFFFFFL)
+    }
+
+    ExpressiveColorPickerBlock(
+        title = stringResource(R.string.settings_custom_color_title),
+        badgeText = hexLabel,
+        badgePrimaryColor = activeColor,
+        badgeSecondaryColor = activeColor,
+        recommendedEntries = ACCENT_PRESETS.map { presetArgb ->
+            ColorSwatchItem(
+                key = presetArgb.toString(16),
+                color = Color(presetArgb.toInt()),
+                selected = !customExpanded && presetArgb == selectedAccentArgb,
+                testTag = "settings_color_preset_${presetArgb.toString(16)}",
+                onClick = {
+                    customExpanded = false
+                    onSelectAccentArgb(presetArgb)
+                }
+            )
+        },
+        customSelected = customExpanded,
+        onSelectCustom = { customExpanded = true },
+        customTestTag = "settings_color_custom_pill",
+        slidersExpanded = customExpanded,
+        sliderColorArgb = selectedAccentArgb,
+        sliderValueBrightness = 0.85f,
+        maxSaturation = 0.96f,
+        onSliderColorChanged = { argb ->
+            customExpanded = true
+            onSelectAccentArgb(argb)
+        },
+        hueSliderTestTag = "settings_custom_hue_slider",
+        satSliderTestTag = "settings_custom_sat_slider"
+    )
+}
+
+@Composable
+private fun DisplayGlowColorEditor(
+    title: String,
+    selectedPreset: GlowColorPreset,
+    customArgb: Long,
+    onSelectPreset: (GlowColorPreset) -> Unit,
+    onSelectCustomArgb: (Long) -> Unit,
+    testTagPrefix: String
+) {
+    val isCustom = selectedPreset == GlowColorPreset.CUSTOM
+    val activeColor = when (selectedPreset) {
+        GlowColorPreset.AUTO -> MaterialTheme.colorScheme.primary
+        GlowColorPreset.CUSTOM -> Color(customArgb.toInt())
+        else -> selectedPreset.argb?.let { Color(it.toInt()) } ?: MaterialTheme.colorScheme.primary
+    }
+    val secondaryBadgeColor = if (selectedPreset == GlowColorPreset.AUTO) {
+        MaterialTheme.colorScheme.tertiary
+    } else {
+        activeColor
+    }
+    val badgeText = when (selectedPreset) {
+        GlowColorPreset.AUTO -> stringResource(R.string.settings_glow_color_auto)
+        GlowColorPreset.CUSTOM -> String.format("#%06X", customArgb and 0xFFFFFFL)
+        else -> String.format("#%06X", (selectedPreset.argb ?: 0L) and 0xFFFFFFL)
+    }
+    val recommendedPresets = remember {
+        GlowColorPreset.entries.filter { it != GlowColorPreset.CUSTOM }
+    }
+
+    ExpressiveColorPickerBlock(
+        title = title,
+        badgeText = badgeText,
+        badgePrimaryColor = activeColor,
+        badgeSecondaryColor = secondaryBadgeColor,
+        recommendedEntries = recommendedPresets.map { preset ->
+            val swatchColor = preset.argb?.let { Color(it.toInt()) }
+                ?: MaterialTheme.colorScheme.primary
+            ColorSwatchItem(
+                key = preset.name,
+                color = swatchColor,
+                secondaryGradientColor = if (preset == GlowColorPreset.AUTO) {
+                    MaterialTheme.colorScheme.tertiary
+                } else {
+                    null
+                },
+                centerGlyph = if (preset == GlowColorPreset.AUTO) {
+                    stringResource(R.string.settings_glow_color_auto).take(1)
+                } else {
+                    null
+                },
+                selected = selectedPreset == preset,
+                testTag = "${testTagPrefix}_${preset.name.lowercase()}",
+                onClick = { onSelectPreset(preset) }
+            )
+        },
+        customSelected = isCustom,
+        onSelectCustom = { onSelectPreset(GlowColorPreset.CUSTOM) },
+        customTestTag = "${testTagPrefix}_custom_pill",
+        slidersExpanded = isCustom,
+        sliderColorArgb = customArgb,
+        sliderValueBrightness = 0.92f,
+        maxSaturation = 1.0f,
+        onSliderColorChanged = onSelectCustomArgb,
+        hueSliderTestTag = "${testTagPrefix}_hue_slider",
+        satSliderTestTag = "${testTagPrefix}_sat_slider"
+    )
+}
+
+private data class ColorSwatchItem(
+    val key: String,
+    val color: Color,
+    val secondaryGradientColor: Color? = null,
+    val centerGlyph: String? = null,
+    val selected: Boolean,
+    val testTag: String,
+    val onClick: () -> Unit
+)
+
+@Composable
+private fun ExpressiveColorPickerBlock(
+    title: String,
+    badgeText: String,
+    badgePrimaryColor: Color,
+    badgeSecondaryColor: Color,
+    recommendedEntries: List<ColorSwatchItem>,
+    customSelected: Boolean,
+    onSelectCustom: () -> Unit,
+    customTestTag: String,
+    slidersExpanded: Boolean,
+    sliderColorArgb: Long,
+    sliderValueBrightness: Float,
+    maxSaturation: Float,
+    onSliderColorChanged: (Long) -> Unit,
+    hueSliderTestTag: String,
+    satSliderTestTag: String
+) {
+    val activeSliderColor = Color(sliderColorArgb.toInt())
     var lastEmittedArgb by remember { mutableStateOf<Long?>(null) }
     var hue by remember {
         mutableFloatStateOf(
-            FloatArray(3).also { android.graphics.Color.colorToHSV(selectedAccentArgb.toInt(), it) }[0]
+            FloatArray(3).also { android.graphics.Color.colorToHSV(sliderColorArgb.toInt(), it) }[0]
         )
     }
     var saturation by remember {
         mutableFloatStateOf(
-            FloatArray(3).also { android.graphics.Color.colorToHSV(selectedAccentArgb.toInt(), it) }[1]
-                .coerceIn(0.25f, 0.96f)
+            FloatArray(3).also { android.graphics.Color.colorToHSV(sliderColorArgb.toInt(), it) }[1]
+                .coerceIn(0.25f, maxSaturation)
         )
     }
 
-    androidx.compose.runtime.LaunchedEffect(selectedAccentArgb) {
-        if (selectedAccentArgb != lastEmittedArgb) {
+    androidx.compose.runtime.LaunchedEffect(sliderColorArgb) {
+        if (sliderColorArgb != lastEmittedArgb) {
             val hsv = FloatArray(3)
-            android.graphics.Color.colorToHSV(selectedAccentArgb.toInt(), hsv)
+            android.graphics.Color.colorToHSV(sliderColorArgb.toInt(), hsv)
             hue = hsv[0]
-            saturation = hsv[1].coerceIn(0.25f, 0.96f)
-            lastEmittedArgb = selectedAccentArgb
+            saturation = hsv[1].coerceIn(0.25f, maxSaturation)
+            lastEmittedArgb = sliderColorArgb
         }
     }
 
-    val hexLabel = remember(selectedAccentArgb) {
-        String.format("#%06X", selectedAccentArgb and 0xFFFFFFL)
-    }
+    val customPillBg by animateColorAsState(
+        targetValue = if (customSelected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(180),
+        label = "custom_color_pill_bg"
+    )
+    val customPillFg by animateColorAsState(
+        targetValue = if (customSelected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(180),
+        label = "custom_color_pill_fg"
+    )
 
     Column(
         modifier = Modifier
@@ -1339,7 +1550,7 @@ private fun CustomAccentColorEditor(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = stringResource(R.string.settings_custom_color_title),
+                text = title,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1356,10 +1567,12 @@ private fun CustomAccentColorEditor(
                         modifier = Modifier
                             .size(12.dp)
                             .clip(CircleShape)
-                            .background(activeColor)
+                            .background(
+                                Brush.linearGradient(listOf(badgePrimaryColor, badgeSecondaryColor))
+                            )
                     )
                     Text(
-                        text = hexLabel,
+                        text = badgeText,
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -1367,22 +1580,82 @@ private fun CustomAccentColorEditor(
             }
         }
 
-        // Quick preset swatches
+        // Sub-header: Recommended label + Custom toggle pill
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = stringResource(R.string.settings_color_recommended),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Surface(
+                shape = CircleShape,
+                color = customPillBg,
+                border = if (customSelected) {
+                    BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+                } else {
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
+                },
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onSelectCustom)
+                    .testTag(customTestTag)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (customSelected) {
+                                    Brush.linearGradient(listOf(activeSliderColor, activeSliderColor))
+                                } else {
+                                    Brush.sweepGradient(
+                                        listOf(
+                                            Color.Red,
+                                            Color.Yellow,
+                                            Color.Green,
+                                            Color.Cyan,
+                                            Color.Blue,
+                                            Color.Magenta,
+                                            Color.Red
+                                        )
+                                    )
+                                }
+                            )
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_color_custom),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (customSelected) FontWeight.SemiBold else FontWeight.Medium
+                        ),
+                        color = customPillFg
+                    )
+                }
+            }
+        }
+
+        // Recommended swatches row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ACCENT_PRESETS.forEach { presetArgb ->
-                val swatchColor = Color(presetArgb.toInt())
-                val isSelected = presetArgb == selectedAccentArgb
+            recommendedEntries.forEach { item ->
                 val swatchScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.12f else 1f,
+                    targetValue = if (item.selected) 1.12f else 1f,
                     animationSpec = spring(
                         dampingRatio = Spring.DampingRatioMediumBouncy,
                         stiffness = Spring.StiffnessMedium
                     ),
-                    label = "swatch_scale"
+                    label = "swatch_scale_${item.key}"
                 )
                 Box(
                     modifier = Modifier
@@ -1392,125 +1665,162 @@ private fun CustomAccentColorEditor(
                             scaleY = swatchScale
                         }
                         .clip(CircleShape)
-                        .background(swatchColor)
+                        .background(
+                            if (item.secondaryGradientColor != null) {
+                                Brush.linearGradient(listOf(item.color, item.secondaryGradientColor))
+                            } else {
+                                Brush.linearGradient(listOf(item.color, item.color))
+                            }
+                        )
                         .border(
-                            width = if (isSelected) 2.5.dp else 1.dp,
-                            color = if (isSelected) {
+                            width = if (item.selected) 2.5.dp else 1.dp,
+                            color = if (item.selected) {
                                 MaterialTheme.colorScheme.onSurface
                             } else {
                                 MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                             },
                             shape = CircleShape
                         )
-                        .clickable {
-                            val hsv = FloatArray(3)
-                            android.graphics.Color.colorToHSV(presetArgb.toInt(), hsv)
-                            hue = hsv[0]
-                            saturation = hsv[1].coerceIn(0.25f, 0.96f)
-                            lastEmittedArgb = presetArgb
-                            onSelectAccentArgb(presetArgb)
-                        }
-                        .testTag("settings_color_preset_${presetArgb.toString(16)}"),
+                        .clickable(onClick = item.onClick)
+                        .testTag(item.testTag),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isSelected) {
+                    if (item.selected) {
                         Icon(
                             imageVector = Icons.Rounded.Check,
                             contentDescription = null,
-                            tint = if (swatchColor.luminance() > 0.55f) Color.Black else Color.White,
+                            tint = if (item.secondaryGradientColor == null && item.color.luminance() > 0.56f) {
+                                Color.Black
+                            } else {
+                                Color.White
+                            },
                             modifier = Modifier.size(16.dp)
+                        )
+                    } else if (item.centerGlyph != null) {
+                        Text(
+                            text = item.centerGlyph,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
                         )
                     }
                 }
             }
         }
 
-        // Custom Hue rainbow slider
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = stringResource(R.string.settings_custom_color_hue),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            val hueBrush = remember {
-                Brush.horizontalGradient(
-                    colors = listOf(
-                        Color.Red,
-                        Color.Yellow,
-                        Color.Green,
-                        Color.Cyan,
-                        Color.Blue,
-                        Color.Magenta,
-                        Color.Red
+        AnimatedVisibility(
+            visible = slidersExpanded,
+            enter = fadeIn(tween(180)) + expandVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(140)) + shrinkVertically()
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Custom Hue rainbow slider
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_custom_color_hue),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                )
-            }
-            Box(contentAlignment = Alignment.Center) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(CircleShape)
-                        .background(hueBrush)
-                )
-                Slider(
-                    value = hue,
-                    onValueChange = { newHue ->
-                        hue = newHue
-                        val packed = android.graphics.Color.HSVToColor(floatArrayOf(newHue, saturation, 0.85f))
-                        val argb = packed.toLong() and 0xFFFFFFFFL
-                        lastEmittedArgb = argb
-                        onSelectAccentArgb(argb)
-                    },
-                    valueRange = 0f..360f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = activeColor,
-                        activeTrackColor = Color.Transparent,
-                        inactiveTrackColor = Color.Transparent
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("settings_custom_hue_slider")
-                )
-            }
-        }
+                    val hueBrush = remember {
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Red,
+                                Color.Yellow,
+                                Color.Green,
+                                Color.Cyan,
+                                Color.Blue,
+                                Color.Magenta,
+                                Color.Red
+                            )
+                        )
+                    }
+                    Box(contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(10.dp)
+                                .clip(CircleShape)
+                                .background(hueBrush)
+                        )
+                        Slider(
+                            value = hue,
+                            onValueChange = { newHue ->
+                                hue = newHue
+                                val packed = android.graphics.Color.HSVToColor(
+                                    floatArrayOf(newHue, saturation, sliderValueBrightness)
+                                )
+                                val argb = packed.toLong() and 0xFFFFFFFFL
+                                lastEmittedArgb = argb
+                                onSliderColorChanged(argb)
+                            },
+                            valueRange = 0f..360f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = activeSliderColor,
+                                activeTrackColor = Color.Transparent,
+                                inactiveTrackColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(hueSliderTestTag)
+                        )
+                    }
+                }
 
-        // Custom Saturation / Richness slider
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                text = stringResource(R.string.settings_custom_color_saturation),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Box(contentAlignment = Alignment.Center) {
-                val lowSatColor = Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.25f, 0.85f)))
-                val highSatColor = Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.96f, 0.85f)))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(CircleShape)
-                        .background(Brush.horizontalGradient(listOf(lowSatColor, highSatColor)))
-                )
-                Slider(
-                    value = saturation,
-                    onValueChange = { newSat ->
-                        saturation = newSat
-                        val packed = android.graphics.Color.HSVToColor(floatArrayOf(hue, newSat, 0.85f))
-                        val argb = packed.toLong() and 0xFFFFFFFFL
-                        lastEmittedArgb = argb
-                        onSelectAccentArgb(argb)
-                    },
-                    valueRange = 0.25f..0.96f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = activeColor,
-                        activeTrackColor = Color.Transparent,
-                        inactiveTrackColor = Color.Transparent
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("settings_custom_sat_slider")
-                )
+                // Custom Saturation slider
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_custom_color_saturation),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        val satBrush = remember(hue, sliderValueBrightness, maxSaturation) {
+                            val lowSatColor = Color(
+                                android.graphics.Color.HSVToColor(
+                                    floatArrayOf(hue, 0.25f, sliderValueBrightness)
+                                )
+                            )
+                            val highSatColor = Color(
+                                android.graphics.Color.HSVToColor(
+                                    floatArrayOf(hue, maxSaturation, sliderValueBrightness)
+                                )
+                            )
+                            Brush.horizontalGradient(listOf(lowSatColor, highSatColor))
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(10.dp)
+                                .clip(CircleShape)
+                                .background(satBrush)
+                        )
+                        Slider(
+                            value = saturation,
+                            onValueChange = { newSat ->
+                                saturation = newSat
+                                val packed = android.graphics.Color.HSVToColor(
+                                    floatArrayOf(hue, newSat, sliderValueBrightness)
+                                )
+                                val argb = packed.toLong() and 0xFFFFFFFFL
+                                lastEmittedArgb = argb
+                                onSliderColorChanged(argb)
+                            },
+                            valueRange = 0.25f..maxSaturation,
+                            colors = SliderDefaults.colors(
+                                thumbColor = activeSliderColor,
+                                activeTrackColor = Color.Transparent,
+                                inactiveTrackColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(satSliderTestTag)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1734,6 +2044,312 @@ private fun SettingsChoicePill(
 }
 
 @Composable
+private fun ExpressiveTouchPreviewStage(
+    state: CalculatorUiState
+) {
+    val restingCorner = when (state.buttonShapeStyle) {
+        ButtonShapeStyle.PILL -> 50.dp
+        ButtonShapeStyle.SQUIRCLE -> 20.dp
+        ButtonShapeStyle.SHARP -> 11.dp
+    }
+    val pressedCorner = when (state.buttonShapeStyle) {
+        ButtonShapeStyle.PILL -> 14.dp
+        ButtonShapeStyle.SQUIRCLE -> 11.dp
+        ButtonShapeStyle.SHARP -> 6.dp
+    }
+    val glowColor = state.glowColorPreset.argb?.let { Color(it) }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = stringResource(R.string.settings_expressive_preview_hint),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ExpressiveCalcButton(
+                    label = "7",
+                    role = CalcButtonRole.DIGIT,
+                    testTag = "settings_expressive_preview_digit",
+                    onClick = {},
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    hasGlow = state.glowTarget == GlowTarget.ALL_KEYS,
+                    glowIntensity = state.glowIntensity,
+                    glowColorOverride = glowColor,
+                    colorTintEnabled = state.colorTintDigits,
+                    keyPressEffect = state.keyPressEffect,
+                    pressSparksEnabled = true,
+                    expressiveTouchStyle = state.expressiveTouchStyle,
+                    restingCornerRadius = restingCorner,
+                    pressedCornerRadius = pressedCorner,
+                    textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Medium)
+                )
+                ExpressiveCalcButton(
+                    label = "=",
+                    role = CalcButtonRole.EQUALS,
+                    testTag = "settings_expressive_preview_equals",
+                    onClick = {},
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    hasGlow = state.glowTarget != GlowTarget.OFF,
+                    glowIntensity = state.glowIntensity,
+                    glowColorOverride = glowColor,
+                    colorTintEnabled = true,
+                    keyPressEffect = state.keyPressEffect,
+                    pressSparksEnabled = true,
+                    expressiveTouchStyle = state.expressiveTouchStyle,
+                    restingCornerRadius = restingCorner,
+                    pressedCornerRadius = pressedCorner,
+                    textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpressiveEffectOptionTile(
+    style: ExpressiveTouchStyle,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String = ""
+) {
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(180),
+        label = "expressive_tile_bg"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(180),
+        label = "expressive_tile_fg"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.02f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "expressive_tile_scale"
+    )
+    val cornerDp by animateDpAsState(
+        targetValue = if (selected) 22.dp else 14.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "expressive_tile_corner"
+    )
+    val shape = RoundedCornerShape(cornerDp)
+    val primaryTint = if (selected) MaterialTheme.colorScheme.primary else contentColor
+    val secondaryTint = if (selected) MaterialTheme.colorScheme.tertiary else contentColor.copy(alpha = 0.72f)
+    val iconPath = remember { Path() }
+
+    Surface(
+        shape = shape,
+        color = containerColor,
+        border = if (selected) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.60f))
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+        },
+        modifier = modifier
+            .height(60.dp)
+            .minimumInteractiveComponentSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)
+        ) {
+            Canvas(modifier = Modifier.size(20.dp)) {
+                val cx = size.width * 0.5f
+                val cy = size.height * 0.5f
+                val r = size.minDimension * 0.40f
+                when (style) {
+                    ExpressiveTouchStyle.TONAL_HALO -> {
+                        drawRoundRect(
+                            color = secondaryTint.copy(alpha = 0.16f),
+                            topLeft = Offset(cx - r * 1.26f, cy - r * 0.96f),
+                            size = Size(r * 2.52f, r * 1.92f),
+                            cornerRadius = CornerRadius(r * 0.64f, r * 0.64f)
+                        )
+                        drawRoundRect(
+                            color = secondaryTint.copy(alpha = 0.68f),
+                            topLeft = Offset(cx - r * 1.26f, cy - r * 0.96f),
+                            size = Size(r * 2.52f, r * 1.92f),
+                            cornerRadius = CornerRadius(r * 0.64f, r * 0.64f),
+                            style = Stroke(width = 1.2.dp.toPx())
+                        )
+                        drawRoundRect(
+                            color = primaryTint.copy(alpha = 0.22f),
+                            topLeft = Offset(cx - r * 0.90f, cy - r * 0.64f),
+                            size = Size(r * 1.80f, r * 1.28f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f)
+                        )
+                        drawRoundRect(
+                            color = primaryTint,
+                            topLeft = Offset(cx - r * 0.90f, cy - r * 0.64f),
+                            size = Size(r * 1.80f, r * 1.28f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f),
+                            style = Stroke(width = 1.6.dp.toPx())
+                        )
+                    }
+                    ExpressiveTouchStyle.FLOWER_MORPH -> {
+                        iconPath.reset()
+                        val pts = 32
+                        for (i in 0 until pts) {
+                            val theta = (i.toFloat() / pts.toFloat()) * (2f * PI.toFloat())
+                            val rad = r * (0.94f + 0.14f * cos(8f * theta))
+                            val px = cx + rad * cos(theta)
+                            val py = cy + rad * sin(theta)
+                            if (i == 0) iconPath.moveTo(px, py) else iconPath.lineTo(px, py)
+                        }
+                        iconPath.close()
+                        drawPath(iconPath, color = primaryTint.copy(alpha = 0.24f))
+                        drawPath(iconPath, color = primaryTint, style = Stroke(width = 1.5.dp.toPx()))
+                        drawCircle(color = secondaryTint.copy(alpha = 0.85f), radius = r * 0.24f, center = Offset(cx, cy))
+                    }
+                    ExpressiveTouchStyle.SPRING_WAVE -> {
+                        drawCircle(color = primaryTint.copy(alpha = 0.16f), radius = r * 1.04f, center = Offset(cx, cy))
+                        drawCircle(
+                            color = secondaryTint.copy(alpha = 0.72f),
+                            radius = r * 1.04f,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = 1.2.dp.toPx())
+                        )
+                        drawCircle(
+                            color = primaryTint,
+                            radius = r * 0.64f,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = 1.6.dp.toPx())
+                        )
+                        drawCircle(color = primaryTint, radius = r * 0.24f, center = Offset(cx, cy))
+                    }
+                    ExpressiveTouchStyle.CAPSULE_BURST -> {
+                        val sw = 2.5.dp.toPx()
+                        val inner = r * 0.44f
+                        val outer = r * 1.06f
+                        for (i in 0 until 6) {
+                            val a = (i * 60f) * (PI.toFloat() / 180f)
+                            val ca = cos(a)
+                            val sa = sin(a)
+                            val col = if (i % 2 == 0) primaryTint else secondaryTint
+                            drawLine(
+                                color = col.copy(alpha = 0.28f),
+                                start = Offset(cx + ca * inner, cy + sa * inner),
+                                end = Offset(cx + ca * outer, cy + sa * outer),
+                                strokeWidth = sw * 1.45f,
+                                cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                color = col,
+                                start = Offset(cx + ca * inner, cy + sa * inner),
+                                end = Offset(cx + ca * outer, cy + sa * outer),
+                                strokeWidth = sw,
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
+                    ExpressiveTouchStyle.CLOVER_BLOOM -> {
+                        iconPath.reset()
+                        val pts = 32
+                        for (i in 0 until pts) {
+                            val theta = (i.toFloat() / pts.toFloat()) * (2f * PI.toFloat())
+                            val rad = r * (0.78f + 0.26f * cos(4f * theta))
+                            val px = cx + rad * cos(theta)
+                            val py = cy + rad * sin(theta)
+                            if (i == 0) iconPath.moveTo(px, py) else iconPath.lineTo(px, py)
+                        }
+                        iconPath.close()
+                        drawPath(iconPath, color = primaryTint.copy(alpha = 0.25f))
+                        drawPath(iconPath, color = primaryTint, style = Stroke(width = 1.5.dp.toPx()))
+                        drawCircle(color = secondaryTint, radius = r * 0.24f, center = Offset(cx, cy))
+                    }
+                    ExpressiveTouchStyle.PRISM_SHIMMER -> {
+                        drawRoundRect(
+                            color = primaryTint.copy(alpha = 0.18f),
+                            topLeft = Offset(cx - r, cy - r * 0.78f),
+                            size = Size(r * 2f, r * 1.56f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f)
+                        )
+                        drawRoundRect(
+                            color = primaryTint,
+                            topLeft = Offset(cx - r, cy - r * 0.78f),
+                            size = Size(r * 2f, r * 1.56f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.45f),
+                            start = Offset(cx - r * 0.56f, cy + r * 0.54f),
+                            end = Offset(cx + r * 0.56f, cy - r * 0.54f),
+                            strokeWidth = 3.2.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                        drawLine(
+                            color = secondaryTint,
+                            start = Offset(cx - r * 0.56f, cy + r * 0.54f),
+                            end = Offset(cx + r * 0.56f, cy - r * 0.54f),
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                ),
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
 private fun SettingsScaleSliderRow(
     icon: ImageVector,
     title: String,
@@ -1789,94 +2405,6 @@ private fun SettingsScaleSliderRow(
                 .fillMaxWidth()
                 .testTag(testTag)
         )
-    }
-}
-
-@Composable
-private fun GlowColorPresetSelector(
-    title: String,
-    selectedPreset: GlowColorPreset,
-    onSelectPreset: (GlowColorPreset) -> Unit,
-    testTagPrefix: String
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            GlowColorPreset.entries.forEach { preset ->
-                val isSelected = selectedPreset == preset
-                val swatchColor = preset.argb?.let { Color(it.toInt()) }
-                    ?: MaterialTheme.colorScheme.primary
-                val swatchScale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.12f else 1f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    ),
-                    label = "${testTagPrefix}_scale"
-                )
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .graphicsLayer {
-                            scaleX = swatchScale
-                            scaleY = swatchScale
-                        }
-                        .clip(CircleShape)
-                        .background(
-                            if (preset == GlowColorPreset.AUTO) {
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.tertiary
-                                    )
-                                )
-                            } else {
-                                Brush.linearGradient(listOf(swatchColor, swatchColor))
-                            }
-                        )
-                        .border(
-                            width = if (isSelected) 2.5.dp else 1.dp,
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
-                            },
-                            shape = CircleShape
-                        )
-                        .clickable { onSelectPreset(preset) }
-                        .testTag("${testTagPrefix}_${preset.name.lowercase()}"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = null,
-                            tint = if (swatchColor.luminance() > 0.58f) Color.Black else Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    } else if (preset == GlowColorPreset.AUTO) {
-                        Text(
-                            text = stringResource(R.string.settings_glow_color_auto).take(1),
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1940,7 +2468,11 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
     val outlineTint = MaterialTheme.colorScheme.outlineVariant
     val primaryColor = MaterialTheme.colorScheme.primary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val resolvedDisplayGlowColor = state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
+    val resolvedDisplayGlowColor = when (state.displayGlowColorPreset) {
+        GlowColorPreset.AUTO -> null
+        GlowColorPreset.CUSTOM -> Color(state.displayGlowCustomArgb.toInt())
+        else -> state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
+    }
 
     val cornerFactor = when (state.buttonShapeStyle) {
         ButtonShapeStyle.PILL -> 0.50f
@@ -2023,8 +2555,8 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
 
                         when (state.displayGlowStyle) {
                             DisplayGlowStyle.AURORA -> {
-                                val c1 = Offset(size.width * 0.25f, displayBottom * 0.36f)
-                                val r1 = size.width * 0.56f
+                                val c1 = Offset(size.width * 0.25f, displayBottom * 0.30f)
+                                val r1 = size.width * 0.52f
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0f to ambPrimary.copy(alpha = (0.34f * dGlowMul).coerceIn(0f, 0.70f)),
@@ -2035,8 +2567,8 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                     center = c1,
                                     radius = r1
                                 )
-                                val c2 = Offset(size.width * 0.78f, displayBottom * 0.72f)
-                                val r2 = size.width * 0.48f
+                                val c2 = Offset(size.width * 0.78f, displayBottom * 0.54f)
+                                val r2 = size.width * 0.44f
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0f to ambTertiary.copy(alpha = (0.28f * dGlowMul).coerceIn(0f, 0.60f)),
@@ -2047,21 +2579,43 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                     center = c2,
                                     radius = r2
                                 )
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.56f to Color.Transparent,
+                                        1f to bgScreenColor
+                                    ),
+                                    size = Size(size.width, displayBottom)
+                                )
                             }
                             DisplayGlowStyle.NEON_FRAME -> {
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.64f to Color.Transparent,
+                                        1f to bgScreenColor.copy(alpha = 0.80f)
+                                    ),
+                                    size = Size(size.width, displayBottom)
+                                )
                                 drawRoundRect(
                                     color = ambPrimary.copy(alpha = (0.65f * dGlowMul).coerceIn(0f, 0.92f)),
-                                    topLeft = Offset(1.dp.toPx(), -displayCorner),
-                                    size = Size(size.width - 2.dp.toPx(), displayBottom + displayCorner - 1.dp.toPx()),
+                                    topLeft = Offset(2.dp.toPx(), -displayCorner),
+                                    size = Size(size.width - 4.dp.toPx(), displayBottom + displayCorner - 2.dp.toPx()),
                                     cornerRadius = CornerRadius(displayCorner, displayCorner),
-                                    style = Stroke(width = 1.6.dp.toPx())
+                                    style = Stroke(width = 1.4.dp.toPx())
                                 )
                             }
                             DisplayGlowStyle.BOTTOM_HORIZON -> {
                                 drawRect(
                                     brush = Brush.verticalGradient(
-                                        0.38f to Color.Transparent,
-                                        1f to ambPrimary.copy(alpha = (0.44f * dGlowMul).coerceIn(0f, 0.75f))
+                                        0.20f to Color.Transparent,
+                                        0.62f to ambPrimary.copy(alpha = (0.42f * dGlowMul).coerceIn(0f, 0.72f)),
+                                        1f to Color.Transparent
+                                    ),
+                                    size = Size(size.width, displayBottom)
+                                )
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.60f to Color.Transparent,
+                                        1f to bgScreenColor
                                     ),
                                     size = Size(size.width, displayBottom)
                                 )

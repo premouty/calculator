@@ -26,6 +26,7 @@ const val DEFAULT_SOUND_VOLUME: Float = 0.75f
 const val DEFAULT_KEYPAD_SCALE: Float = 1.0f
 const val DEFAULT_FX_SCALE: Float = 1.0f
 const val DEFAULT_GLOW_INTENSITY: Float = 1.0f
+const val DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB: Long = 0xFF6366F1L
 
 enum class AngleUnit {
     DEG,
@@ -50,7 +51,8 @@ enum class GlowColorPreset(val argb: Long?) {
     VIOLET(0xFFA855F7L),
     ROSE(0xFFF43F5EL),
     AMBER(0xFFF59E0BL),
-    EMERALD(0xFF10B981L)
+    EMERALD(0xFF10B981L),
+    CUSTOM(null)
 }
 
 enum class KeyPressEffect {
@@ -60,10 +62,13 @@ enum class KeyPressEffect {
     SOFT_TILT
 }
 
-enum class PressSparkStyle {
-    SPARKS,
-    STARLIGHT,
-    FIREWORK
+enum class ExpressiveTouchStyle {
+    TONAL_HALO,
+    FLOWER_MORPH,
+    SPRING_WAVE,
+    CAPSULE_BURST,
+    CLOVER_BLOOM,
+    PRISM_SHIMMER
 }
 
 enum class ResultAnimStyle {
@@ -131,12 +136,13 @@ data class UserCalcPreferences(
     val keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     val resultAnimStyle: ResultAnimStyle = ResultAnimStyle.SLIDE_UP,
     val pressSparksEnabled: Boolean = false,
-    val pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    val expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     val glowBreathingEnabled: Boolean = false,
     val themeAnimStyle: ThemeAnimStyle = ThemeAnimStyle.INSTANT,
     val displayGlowStyle: DisplayGlowStyle = DisplayGlowStyle.AURORA,
     val displayGlowIntensity: Float = DEFAULT_GLOW_INTENSITY,
-    val displayGlowColorPreset: GlowColorPreset = GlowColorPreset.AUTO
+    val displayGlowColorPreset: GlowColorPreset = GlowColorPreset.AUTO,
+    val displayGlowCustomArgb: Long = DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB
 )
 
 class UserPreferencesRepository(private val context: Context) {
@@ -180,6 +186,7 @@ class UserPreferencesRepository(private val context: Context) {
         val DISPLAY_GLOW_STYLE = stringPreferencesKey("display_glow_style")
         val DISPLAY_GLOW_INTENSITY = floatPreferencesKey("display_glow_intensity")
         val DISPLAY_GLOW_COLOR_PRESET = stringPreferencesKey("display_glow_color_preset")
+        val DISPLAY_GLOW_CUSTOM_ARGB = longPreferencesKey("display_glow_custom_argb")
     }
 
     private object SyncKeys {
@@ -222,6 +229,7 @@ class UserPreferencesRepository(private val context: Context) {
         const val DISPLAY_GLOW_STYLE = "display_glow_style"
         const val DISPLAY_GLOW_INTENSITY = "display_glow_intensity"
         const val DISPLAY_GLOW_COLOR_PRESET = "display_glow_color_preset"
+        const val DISPLAY_GLOW_CUSTOM_ARGB = "display_glow_custom_argb"
     }
 
     private val syncPrefs: SharedPreferences =
@@ -278,9 +286,9 @@ class UserPreferencesRepository(private val context: Context) {
             runCatching { ResultAnimStyle.valueOf(it) }.getOrNull()
         } ?: ResultAnimStyle.SLIDE_UP
 
-        val pressSparkStyle = syncPrefs.getString(SyncKeys.PRESS_SPARK_STYLE, null)?.let {
-            runCatching { PressSparkStyle.valueOf(it) }.getOrNull()
-        } ?: PressSparkStyle.SPARKS
+        val expressiveTouchStyle = syncPrefs.getString(SyncKeys.PRESS_SPARK_STYLE, null)?.let {
+            runCatching { ExpressiveTouchStyle.valueOf(it) }.getOrNull()
+        } ?: ExpressiveTouchStyle.TONAL_HALO
 
         val themeAnimStyle = ThemeAnimStyle.INSTANT
 
@@ -336,12 +344,13 @@ class UserPreferencesRepository(private val context: Context) {
             keyPressEffect = keyPressEffect,
             resultAnimStyle = resultAnimStyle,
             pressSparksEnabled = syncPrefs.getBoolean(SyncKeys.PRESS_SPARKS_ENABLED, false),
-            pressSparkStyle = pressSparkStyle,
+            expressiveTouchStyle = expressiveTouchStyle,
             glowBreathingEnabled = syncPrefs.getBoolean(SyncKeys.GLOW_BREATHING_ENABLED, false),
             themeAnimStyle = themeAnimStyle,
             displayGlowStyle = displayGlowStyle,
             displayGlowIntensity = displayGlowIntensity,
-            displayGlowColorPreset = displayGlowColorPreset
+            displayGlowColorPreset = displayGlowColorPreset,
+            displayGlowCustomArgb = syncPrefs.getLong(SyncKeys.DISPLAY_GLOW_CUSTOM_ARGB, DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB)
         )
     }
 
@@ -401,9 +410,9 @@ class UserPreferencesRepository(private val context: Context) {
             runCatching { ResultAnimStyle.valueOf(it) }.getOrNull()
         } ?: ResultAnimStyle.SLIDE_UP
         val pressSparksEnabled = prefs[Keys.PRESS_SPARKS_ENABLED] ?: false
-        val pressSparkStyle = prefs[Keys.PRESS_SPARK_STYLE]?.let {
-            runCatching { PressSparkStyle.valueOf(it) }.getOrNull()
-        } ?: PressSparkStyle.SPARKS
+        val expressiveTouchStyle = prefs[Keys.PRESS_SPARK_STYLE]?.let {
+            runCatching { ExpressiveTouchStyle.valueOf(it) }.getOrNull()
+        } ?: ExpressiveTouchStyle.TONAL_HALO
         val glowBreathingEnabled = prefs[Keys.GLOW_BREATHING_ENABLED] ?: false
         val themeAnimStyle = ThemeAnimStyle.INSTANT
         val displayGlowStyle = prefs[Keys.DISPLAY_GLOW_STYLE]?.let {
@@ -414,6 +423,7 @@ class UserPreferencesRepository(private val context: Context) {
         val displayGlowColorPreset = prefs[Keys.DISPLAY_GLOW_COLOR_PRESET]?.let {
             runCatching { GlowColorPreset.valueOf(it) }.getOrNull()
         } ?: GlowColorPreset.AUTO
+        val displayGlowCustomArgb = prefs[Keys.DISPLAY_GLOW_CUSTOM_ARGB] ?: DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB
 
         // Backfill synchronous mirror once for installations migrating from DataStore-only
         if (!syncPrefs.contains(SyncKeys.THEME_MODE) && prefs.contains(Keys.THEME_MODE)) {
@@ -513,7 +523,7 @@ class UserPreferencesRepository(private val context: Context) {
             syncPrefs.edit().putBoolean(SyncKeys.PRESS_SPARKS_ENABLED, pressSparksEnabled).apply()
         }
         if (!syncPrefs.contains(SyncKeys.PRESS_SPARK_STYLE) && prefs.contains(Keys.PRESS_SPARK_STYLE)) {
-            syncPrefs.edit().putString(SyncKeys.PRESS_SPARK_STYLE, pressSparkStyle.name).apply()
+            syncPrefs.edit().putString(SyncKeys.PRESS_SPARK_STYLE, expressiveTouchStyle.name).apply()
         }
         if (!syncPrefs.contains(SyncKeys.GLOW_BREATHING_ENABLED) && prefs.contains(Keys.GLOW_BREATHING_ENABLED)) {
             syncPrefs.edit().putBoolean(SyncKeys.GLOW_BREATHING_ENABLED, glowBreathingEnabled).apply()
@@ -529,6 +539,9 @@ class UserPreferencesRepository(private val context: Context) {
         }
         if (!syncPrefs.contains(SyncKeys.DISPLAY_GLOW_COLOR_PRESET) && prefs.contains(Keys.DISPLAY_GLOW_COLOR_PRESET)) {
             syncPrefs.edit().putString(SyncKeys.DISPLAY_GLOW_COLOR_PRESET, displayGlowColorPreset.name).apply()
+        }
+        if (!syncPrefs.contains(SyncKeys.DISPLAY_GLOW_CUSTOM_ARGB) && prefs.contains(Keys.DISPLAY_GLOW_CUSTOM_ARGB)) {
+            syncPrefs.edit().putLong(SyncKeys.DISPLAY_GLOW_CUSTOM_ARGB, displayGlowCustomArgb).apply()
         }
 
         UserCalcPreferences(
@@ -564,12 +577,13 @@ class UserPreferencesRepository(private val context: Context) {
             keyPressEffect = keyPressEffect,
             resultAnimStyle = resultAnimStyle,
             pressSparksEnabled = pressSparksEnabled,
-            pressSparkStyle = pressSparkStyle,
+            expressiveTouchStyle = expressiveTouchStyle,
             glowBreathingEnabled = glowBreathingEnabled,
             themeAnimStyle = themeAnimStyle,
             displayGlowStyle = displayGlowStyle,
             displayGlowIntensity = displayGlowIntensity,
-            displayGlowColorPreset = displayGlowColorPreset
+            displayGlowColorPreset = displayGlowColorPreset,
+            displayGlowCustomArgb = displayGlowCustomArgb
         )
     }
 
@@ -773,7 +787,7 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.PRESS_SPARKS_ENABLED] = enabled }
     }
 
-    suspend fun setPressSparkStyle(style: PressSparkStyle) {
+    suspend fun setExpressiveTouchStyle(style: ExpressiveTouchStyle) {
         syncPrefs.edit().putString(SyncKeys.PRESS_SPARK_STYLE, style.name).apply()
         context.dataStore.edit { it[Keys.PRESS_SPARK_STYLE] = style.name }
     }
@@ -804,6 +818,17 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[Keys.DISPLAY_GLOW_COLOR_PRESET] = preset.name }
     }
 
+    suspend fun setDisplayGlowCustomArgb(argb: Long) {
+        syncPrefs.edit()
+            .putLong(SyncKeys.DISPLAY_GLOW_CUSTOM_ARGB, argb)
+            .putString(SyncKeys.DISPLAY_GLOW_COLOR_PRESET, GlowColorPreset.CUSTOM.name)
+            .apply()
+        context.dataStore.edit {
+            it[Keys.DISPLAY_GLOW_CUSTOM_ARGB] = argb
+            it[Keys.DISPLAY_GLOW_COLOR_PRESET] = GlowColorPreset.CUSTOM.name
+        }
+    }
+
     suspend fun resetCustomizationsToDefaults() {
         syncPrefs.edit()
             .putFloat(SyncKeys.SOUND_VOLUME, DEFAULT_SOUND_VOLUME)
@@ -832,12 +857,13 @@ class UserPreferencesRepository(private val context: Context) {
             .putString(SyncKeys.KEY_PRESS_EFFECT, KeyPressEffect.SPRING.name)
             .putString(SyncKeys.RESULT_ANIM_STYLE, ResultAnimStyle.SLIDE_UP.name)
             .putBoolean(SyncKeys.PRESS_SPARKS_ENABLED, false)
-            .putString(SyncKeys.PRESS_SPARK_STYLE, PressSparkStyle.SPARKS.name)
+            .putString(SyncKeys.PRESS_SPARK_STYLE, ExpressiveTouchStyle.TONAL_HALO.name)
             .putBoolean(SyncKeys.GLOW_BREATHING_ENABLED, false)
             .putString(SyncKeys.THEME_ANIM_STYLE, ThemeAnimStyle.INSTANT.name)
             .putString(SyncKeys.DISPLAY_GLOW_STYLE, DisplayGlowStyle.AURORA.name)
             .putFloat(SyncKeys.DISPLAY_GLOW_INTENSITY, DEFAULT_GLOW_INTENSITY)
             .putString(SyncKeys.DISPLAY_GLOW_COLOR_PRESET, GlowColorPreset.AUTO.name)
+            .putLong(SyncKeys.DISPLAY_GLOW_CUSTOM_ARGB, DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB)
             .apply()
         context.dataStore.edit {
             it[Keys.SOUND_VOLUME] = DEFAULT_SOUND_VOLUME
@@ -866,12 +892,13 @@ class UserPreferencesRepository(private val context: Context) {
             it[Keys.KEY_PRESS_EFFECT] = KeyPressEffect.SPRING.name
             it[Keys.RESULT_ANIM_STYLE] = ResultAnimStyle.SLIDE_UP.name
             it[Keys.PRESS_SPARKS_ENABLED] = false
-            it[Keys.PRESS_SPARK_STYLE] = PressSparkStyle.SPARKS.name
+            it[Keys.PRESS_SPARK_STYLE] = ExpressiveTouchStyle.TONAL_HALO.name
             it[Keys.GLOW_BREATHING_ENABLED] = false
             it[Keys.THEME_ANIM_STYLE] = ThemeAnimStyle.INSTANT.name
             it[Keys.DISPLAY_GLOW_STYLE] = DisplayGlowStyle.AURORA.name
             it[Keys.DISPLAY_GLOW_INTENSITY] = DEFAULT_GLOW_INTENSITY
             it[Keys.DISPLAY_GLOW_COLOR_PRESET] = GlowColorPreset.AUTO.name
+            it[Keys.DISPLAY_GLOW_CUSTOM_ARGB] = DEFAULT_DISPLAY_GLOW_CUSTOM_ARGB
         }
     }
 }

@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -110,7 +111,7 @@ import com.example.data.preferences.AngleUnit
 import com.example.data.preferences.ButtonShapeStyle
 import com.example.data.preferences.GlowTarget
 import com.example.data.preferences.KeyPressEffect
-import com.example.data.preferences.PressSparkStyle
+import com.example.data.preferences.ExpressiveTouchStyle
 import com.example.data.preferences.ThemeAnimStyle
 import com.example.ui.CalculatorUiState
 import com.example.ui.CalculatorViewModel
@@ -120,12 +121,14 @@ import com.example.ui.components.CalculatorDisplay
 import com.example.ui.components.ExpressiveCalcButton
 import com.example.ui.components.FeedbackPermissionDialog
 import com.example.ui.components.FullHistoryBottomSheet
+import com.example.ui.components.GlowPaintCache
 import com.example.ui.components.LocalPerformCalcHaptic
 import com.example.ui.components.LocalPlayCalcSound
 import com.example.ui.components.ScientificCalcButton
 import com.example.ui.components.SettingsBottomSheet
 import com.example.ui.components.TopPullDownHistoryOverlay
 import com.example.ui.components.VoiceMathInputOverlay
+import com.example.ui.components.drawSmoothBacklight
 import com.example.ui.theme.PlusJakartaSansFontFamily
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -382,7 +385,7 @@ fun CalculatorScreen(
                                 if (isCompactVertical) 8.dp else 10.dp
                             }
 
-                            val maxStdBudget = (maxHeight - 235.dp - (desiredFxTrayHeight * 0.55f))
+                            val maxStdBudget = (maxHeight - 242.dp - (desiredFxTrayHeight * 0.55f))
                                 .coerceAtLeast(210.dp)
                             val maxAllowedStdRowH = ((maxStdBudget - stdRowSpacing * 4f - 14.dp) / 5f)
                                 .coerceIn(38.dp, 68.dp)
@@ -390,7 +393,7 @@ fun CalculatorScreen(
                                 .coerceIn(38.dp, maxAllowedStdRowH)
 
                             val keypadTotalEstimate = stdRowHeight * 5f + stdRowSpacing * 4f + 16.dp
-                            val maxAllowedFxH = (maxHeight - keypadTotalEstimate - 220.dp)
+                            val maxAllowedFxH = (maxHeight - keypadTotalEstimate - 232.dp)
                                 .coerceIn(72.dp, 142.dp)
                             val fxTrayHeight = desiredFxTrayHeight.coerceIn(72.dp, maxAllowedFxH)
 
@@ -527,7 +530,6 @@ fun CalculatorScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxWidth()
-                                            .navigationBarsPadding()
                                             .padding(horizontal = 20.dp, vertical = 8.dp)
                                             .drawBehind {
                                                 if (state.fxUnifiedWithKeypad) {
@@ -560,7 +562,13 @@ fun CalculatorScreen(
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxHeight()
-                                                    .clipToBounds()
+                                                    .then(
+                                                        if (scientificExpandState.value < 0.999f) {
+                                                            Modifier.clipToBounds()
+                                                        } else {
+                                                            Modifier
+                                                        }
+                                                    )
                                                     .layout { measurable, constraints ->
                                                         val p = scientificExpandState.value.coerceIn(0f, 1f)
                                                         val targetFullPx = fullSciWidth.roundToPx()
@@ -596,7 +604,7 @@ fun CalculatorScreen(
                                                     colorTintFx = state.colorTintFx,
                                                     keyPressEffect = state.keyPressEffect,
                                                     pressSparksEnabled = state.pressSparksEnabled,
-                                                    pressSparkStyle = state.pressSparkStyle,
+                                                    expressiveTouchStyle = state.expressiveTouchStyle,
                                                     modifier = Modifier
                                                         .fillMaxSize()
                                                         .graphicsLayer {
@@ -622,7 +630,7 @@ fun CalculatorScreen(
                                             colorTintUtilities = state.colorTintUtilities,
                                             keyPressEffect = state.keyPressEffect,
                                             pressSparksEnabled = state.pressSparksEnabled,
-                                            pressSparkStyle = state.pressSparkStyle,
+                                            expressiveTouchStyle = state.expressiveTouchStyle,
                                             glowBreathingEnabled = state.glowBreathingEnabled,
                                             modifier = Modifier
                                                 .weight(1f)
@@ -663,36 +671,7 @@ fun CalculatorScreen(
                                             }
                                         }
                                     }
-                                    val fxRevealClipShape = remember(
-                                        scientificExpandState,
-                                        fxTrayHeight,
-                                        unifiedTargetShiftPx,
-                                        state.fxUnifiedWithKeypad
-                                    ) {
-                                        object : Shape {
-                                            override fun createOutline(
-                                                size: Size,
-                                                layoutDirection: LayoutDirection,
-                                                density: Density
-                                            ): Outline {
-                                                val p = scientificExpandState.value.coerceIn(0f, 1f)
-                                                val clipBottom = (size.height - (1f - p) * (size.height * 0.14f))
-                                                    .coerceIn(0f, size.height)
-                                                val clipTop = (clipBottom - size.height * p)
-                                                    .coerceIn(0f, clipBottom)
-                                                return Outline.Rectangle(
-                                                    Rect(
-                                                        left = 0f,
-                                                        top = clipTop,
-                                                        right = size.width,
-                                                        bottom = clipBottom
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Upper region: pre-composed Fx grid behind lifted display & toggle strip -> 0 Frame-1 hitch, 0 overlap
+                                    // Upper region: pre-composed Fx grid behind lifted display & toggle strip -> 0 Frame-1 hitch, unclipped glow
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
@@ -715,7 +694,7 @@ fun CalculatorScreen(
                                             colorTintFx = state.colorTintFx,
                                             keyPressEffect = state.keyPressEffect,
                                             pressSparksEnabled = state.pressSparksEnabled,
-                                            pressSparkStyle = state.pressSparkStyle,
+                                            expressiveTouchStyle = state.expressiveTouchStyle,
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
                                                 .fillMaxWidth()
@@ -731,11 +710,10 @@ fun CalculatorScreen(
                                                 )
                                                 .graphicsLayer {
                                                     val p = scientificExpandState.value.coerceIn(0f, 1f)
-                                                    compositingStrategy = CompositingStrategy.Offscreen
-                                                    alpha = if (p <= 0.001f) 0f else ((p - 0.06f) / 0.94f).coerceIn(0f, 1f)
-                                                    translationY = unifiedTargetShiftPx * p + (1f - p) * (size.height * 0.14f)
-                                                    clip = true
-                                                    shape = fxRevealClipShape
+                                                    alpha = if (p <= 0.001f) 0f else ((p - 0.05f) / 0.95f).coerceIn(0f, 1f)
+                                                    translationY = unifiedTargetShiftPx * p + (1f - p) * (fxBottomGapPx * 0.65f)
+                                                    scaleY = 0.92f + 0.08f * p
+                                                    transformOrigin = TransformOrigin(0.5f, 1f)
                                                 }
                                                 .drawWithContent {
                                                     if (scientificExpandState.value > 0.001f || isSciExpandedState.value) {
@@ -790,8 +768,7 @@ fun CalculatorScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .navigationBarsPadding()
-                                            .padding(start = 18.dp, end = 18.dp, top = topPadDp, bottom = 8.dp)
+                                            .padding(start = 18.dp, end = 18.dp, top = topPadDp, bottom = 10.dp)
                                             .height(collapsedKeypadInnerDp)
                                             .onGloballyPositioned { coords ->
                                                 if (coords.isAttached) {
@@ -828,7 +805,7 @@ fun CalculatorScreen(
                                                 colorTintUtilities = state.colorTintUtilities,
                                                 keyPressEffect = state.keyPressEffect,
                                                 pressSparksEnabled = state.pressSparksEnabled,
-                                                pressSparkStyle = state.pressSparkStyle,
+                                                expressiveTouchStyle = state.expressiveTouchStyle,
                                                 glowBreathingEnabled = state.glowBreathingEnabled,
                                                 modifier = Modifier.fillMaxWidth()
                                             )
@@ -930,8 +907,10 @@ fun CalculatorScreen(
         if (state.isSettingsSheetOpen) {
             SettingsBottomSheet(
                 state = state,
+                initialScrollIndex = viewModel.savedSettingsScrollIndex,
+                initialScrollOffset = viewModel.savedSettingsScrollOffset,
                 onDismiss = { viewModel.setSettingsSheetOpen(false) },
-                onSaveScrollPosition = viewModel::setSettingsScrollPosition,
+                onSaveScrollPosition = viewModel::saveSettingsScrollPosition,
                 onToggleVibrationExpanded = viewModel::setSettingsVibrationExpanded,
                 onToggleSound = viewModel::toggleSoundEnabled,
                 onChangeSoundVolume = viewModel::setSoundVolume,
@@ -960,13 +939,14 @@ fun CalculatorScreen(
                 onChangeGlowIntensity = viewModel::setGlowIntensity,
                 onSelectResultAnimStyle = viewModel::setResultAnimStyle,
                 onTogglePressSparks = viewModel::setPressSparksEnabled,
-                onSelectPressSparkStyle = viewModel::setPressSparkStyle,
+                onSelectExpressiveTouchStyle = viewModel::setExpressiveTouchStyle,
                 onToggleGlowBreathing = viewModel::setGlowBreathingEnabled,
                 onToggleLivePreview = viewModel::setShowLivePreview,
                 onToggleAmbientDisplayGlow = viewModel::setAmbientDisplayGlow,
                 onSelectDisplayGlowStyle = viewModel::setDisplayGlowStyle,
                 onChangeDisplayGlowIntensity = viewModel::setDisplayGlowIntensity,
                 onSelectDisplayGlowColorPreset = viewModel::setDisplayGlowColorPreset,
+                onSelectDisplayGlowCustomArgb = viewModel::setDisplayGlowCustomArgb,
                 onResetDefaults = viewModel::resetCustomizationsToDefaults
             )
         }
@@ -1176,25 +1156,23 @@ private fun GlowingActionPill(
                 }
                 .then(
                     if (glowEnabled) {
+                        val pillGlowCache = remember { GlowPaintCache() }
                         Modifier.drawBehind {
                             val pulse = maxOf(glowPulse.value, if (isPressed) 0.7f else 0f)
-                            val baseAlpha = ((if (isDark) 0.28f else 0.22f) * clampedIntensity + pulse * 0.18f * clampedIntensity)
+                            val glowAlpha = ((if (isDark) 0.36f else 0.28f) * clampedIntensity + pulse * 0.22f * clampedIntensity)
                                 .coerceIn(0f, 0.85f)
-                            val maxSpreadPx = ((4f * (0.72f + 0.28f * clampedIntensity)) + pulse * 2f * clampedIntensity).dp.toPx()
+                            val expandPx = (1.0f + pulse * 1.0f * clampedIntensity).dp.toPx()
+                            val blurRadiusPx = (4.8f * (0.76f + 0.24f * clampedIntensity) + pulse * 2.5f * clampedIntensity).dp.toPx()
                             val halfH = size.height / 2f
-                            val steps = 3
-                            for (i in steps downTo 1) {
-                                val t = i.toFloat() / steps.toFloat()
-                                val expand = maxSpreadPx * t
-                                val layerAlpha = (baseAlpha * (1f - t * 0.68f) * 0.44f).coerceIn(0f, 1f)
-                                val corner = halfH + expand
-                                drawRoundRect(
-                                    color = softGlowColor.copy(alpha = layerAlpha),
-                                    topLeft = Offset(-expand, -expand),
-                                    size = Size(size.width + expand * 2f, size.height + expand * 2f),
-                                    cornerRadius = CornerRadius(corner, corner)
-                                )
-                            }
+                            drawSmoothBacklight(
+                                cache = pillGlowCache,
+                                color = softGlowColor,
+                                alpha = glowAlpha,
+                                expandPx = expandPx,
+                                blurRadiusPx = blurRadiusPx,
+                                cornerRadiusPx = halfH,
+                                cornerExpandRatio = 1f
+                            )
                         }
                     } else {
                         Modifier
@@ -1269,7 +1247,7 @@ private fun FxScientificPanel(
     colorTintFx: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
-    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     modifier: Modifier = Modifier
 ) {
     val restingCorner = when (buttonShapeStyle) {
@@ -1378,7 +1356,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = "INV",
@@ -1397,7 +1375,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "sin⁻¹" else "sin",
@@ -1416,7 +1394,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "cos⁻¹" else "cos",
@@ -1435,7 +1413,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "tan⁻¹" else "tan",
@@ -1454,7 +1432,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
 
             // 5..9: π, e, xʸ, ln, log
@@ -1475,7 +1453,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = "e",
@@ -1494,7 +1472,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = "xʸ",
@@ -1513,7 +1491,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "eˣ" else "ln",
@@ -1532,7 +1510,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "10ˣ" else "log",
@@ -1551,7 +1529,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
 
             // 10..14: (, ), √, x!, ±
@@ -1572,7 +1550,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = ")",
@@ -1591,7 +1569,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = if (isInverse) "x²" else "√",
@@ -1610,7 +1588,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = "x!",
@@ -1629,7 +1607,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
             ScientificCalcButton(
                 label = "±",
@@ -1648,7 +1626,7 @@ private fun FxScientificPanel(
                 glowIntensity = glowIntensity,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle
+                expressiveTouchStyle = expressiveTouchStyle
             )
         }
     ) { measurables, constraints ->
@@ -1715,7 +1693,7 @@ private fun StandardKeypadGrid(
     colorTintUtilities: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
-    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1749,7 +1727,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintUtilities,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1767,7 +1745,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1793,7 +1771,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1811,7 +1789,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1822,9 +1800,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 2: 7, 8, 9, ×
-            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("7", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("8", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("9", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "×",
                 role = CalcButtonRole.OPERATOR,
@@ -1835,7 +1813,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1846,9 +1824,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 3: 4, 5, 6, −
-            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("4", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("5", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("6", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "−",
                 role = CalcButtonRole.OPERATOR,
@@ -1859,7 +1837,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1870,9 +1848,9 @@ private fun StandardKeypadGrid(
             )
 
             // Row 4: 1, 2, 3, +
-            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
-            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("1", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("2", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
+            DigitButton("3", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = "+",
                 role = CalcButtonRole.OPERATOR,
@@ -1883,7 +1861,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintOperators,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1894,7 +1872,7 @@ private fun StandardKeypadGrid(
             )
 
             // Row 5: 0, ., ⌫, =
-            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, pressSparkStyle, glowBreathingEnabled)
+            DigitButton("0", viewModel, restingCornerRadius, pressedCornerRadius, contentScaleState, textScale, keyGlow, glowIntensity, glowColorOverride, colorTintDigits, keyPressEffect, pressSparksEnabled, expressiveTouchStyle, glowBreathingEnabled)
             ExpressiveCalcButton(
                 label = ".",
                 role = CalcButtonRole.DIGIT,
@@ -1905,7 +1883,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintDigits,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1923,7 +1901,7 @@ private fun StandardKeypadGrid(
                 colorTintEnabled = colorTintUtilities,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -1948,7 +1926,7 @@ private fun StandardKeypadGrid(
                 glowColorOverride = glowColorOverride,
                 keyPressEffect = keyPressEffect,
                 pressSparksEnabled = pressSparksEnabled,
-                pressSparkStyle = pressSparkStyle,
+                expressiveTouchStyle = expressiveTouchStyle,
                 glowBreathingEnabled = glowBreathingEnabled,
                 restingCornerRadius = restingCornerRadius,
                 pressedCornerRadius = pressedCornerRadius,
@@ -2024,7 +2002,7 @@ private fun DigitButton(
     colorTintEnabled: Boolean = true,
     keyPressEffect: KeyPressEffect = KeyPressEffect.SPRING,
     pressSparksEnabled: Boolean = false,
-    pressSparkStyle: PressSparkStyle = PressSparkStyle.SPARKS,
+    expressiveTouchStyle: ExpressiveTouchStyle = ExpressiveTouchStyle.TONAL_HALO,
     glowBreathingEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -2038,7 +2016,7 @@ private fun DigitButton(
         colorTintEnabled = colorTintEnabled,
         keyPressEffect = keyPressEffect,
         pressSparksEnabled = pressSparksEnabled,
-        pressSparkStyle = pressSparkStyle,
+        expressiveTouchStyle = expressiveTouchStyle,
         glowBreathingEnabled = glowBreathingEnabled,
         restingCornerRadius = restingCornerRadius,
         pressedCornerRadius = pressedCornerRadius,
