@@ -119,6 +119,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -299,19 +300,21 @@ fun CalculatorDisplay(
         if (state.isResultDisplayed && !prevIsResultDisplayed) {
             when (state.resultAnimStyle) {
                 ResultAnimStyle.SLIDE_UP -> {
+                    resultShimmerAnim.snapTo(0f)
                     resultRevealAnim.snapTo(0f)
                     resultRevealAnim.animateTo(
                         targetValue = 1f,
-                        animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                        animationSpec = tween(durationMillis = 200, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
                     )
                 }
                 ResultAnimStyle.ELASTIC_POP -> {
+                    resultShimmerAnim.snapTo(0f)
                     resultRevealAnim.snapTo(0f)
                     resultRevealAnim.animateTo(
                         targetValue = 1f,
                         animationSpec = spring(
-                            dampingRatio = 0.56f,
-                            stiffness = 540f
+                            dampingRatio = 0.46f,
+                            stiffness = 520f
                         )
                     )
                 }
@@ -327,10 +330,43 @@ fun CalculatorDisplay(
                         resultShimmerAnim.snapTo(0f)
                         resultShimmerAnim.animateTo(
                             targetValue = 1f,
-                            animationSpec = tween(durationMillis = 520, easing = CubicBezierEasing(0.25f, 0.8f, 0.25f, 1f))
+                            animationSpec = tween(durationMillis = 780, easing = CubicBezierEasing(0.22f, 0.82f, 0.28f, 1f))
                         )
                         resultShimmerAnim.snapTo(0f)
                     }
+                }
+                ResultAnimStyle.ZOOM_FOCUS -> {
+                    resultShimmerAnim.snapTo(0f)
+                    resultRevealAnim.snapTo(0f)
+                    resultRevealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.68f,
+                            stiffness = 480f
+                        )
+                    )
+                }
+                ResultAnimStyle.GLIDE_RIGHT -> {
+                    resultShimmerAnim.snapTo(0f)
+                    resultRevealAnim.snapTo(0f)
+                    resultRevealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.78f,
+                            stiffness = 500f
+                        )
+                    )
+                }
+                ResultAnimStyle.FLIP_REVEAL -> {
+                    resultShimmerAnim.snapTo(0f)
+                    resultRevealAnim.snapTo(0f)
+                    resultRevealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.66f,
+                            stiffness = 440f
+                        )
+                    )
                 }
             }
         } else if (!state.isResultDisplayed) {
@@ -373,10 +409,21 @@ fun CalculatorDisplay(
         GlowColorPreset.CUSTOM -> Color(state.displayGlowCustomArgb.toInt())
         else -> state.displayGlowColorPreset.argb?.let { Color(it.toInt()) }
     }
-    val ambientPrimaryColor = displayGlowOverrideColor ?: MaterialTheme.colorScheme.primary
-    val ambientTertiaryColor = displayGlowOverrideColor?.let {
-        lerp(it, MaterialTheme.colorScheme.tertiary, 0.42f)
-    } ?: MaterialTheme.colorScheme.tertiary
+    val rawPrimaryColor = MaterialTheme.colorScheme.primary
+    val autoGlowColor = remember(rawPrimaryColor, isDarkDisplaySurface) {
+        val hsv = FloatArray(3)
+        android.graphics.Color.colorToHSV(rawPrimaryColor.toArgb(), hsv)
+        if (isDarkDisplaySurface && hsv[1] < 0.52f) {
+            Color(
+                android.graphics.Color.HSVToColor(
+                    floatArrayOf(hsv[0], (hsv[1] + 0.26f).coerceIn(0.48f, 0.80f), hsv[2].coerceAtMost(0.92f))
+                )
+            )
+        } else {
+            rawPrimaryColor
+        }
+    }
+    val ambientPrimaryColor = displayGlowOverrideColor ?: autoGlowColor
     val displayGlowMul = state.displayGlowIntensity.coerceIn(0.40f, 2.0f)
     val themeAlphaBoost = if (isDarkDisplaySurface) 1.0f else 1.22f
     val ambientBorderPath = remember { Path() }
@@ -496,9 +543,9 @@ fun CalculatorDisplay(
                                 val r2 = maxOf(size.width, visibleBottom) * 0.60f * (0.95f + 0.05f * breathMul)
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        0.0f to ambientTertiaryColor.copy(alpha = (0.26f * intensity).coerceIn(0f, 0.58f)),
-                                        0.48f to ambientTertiaryColor.copy(alpha = (0.11f * intensity).coerceIn(0f, 0.28f)),
-                                        0.80f to ambientTertiaryColor.copy(alpha = (0.03f * intensity).coerceIn(0f, 0.10f)),
+                                        0.0f to ambientPrimaryColor.copy(alpha = (0.24f * intensity).coerceIn(0f, 0.54f)),
+                                        0.48f to ambientPrimaryColor.copy(alpha = (0.10f * intensity).coerceIn(0f, 0.26f)),
+                                        0.80f to ambientPrimaryColor.copy(alpha = (0.03f * intensity).coerceIn(0f, 0.10f)),
                                         1.0f to Color.Transparent,
                                         center = c2,
                                         radius = r2
@@ -510,7 +557,7 @@ fun CalculatorDisplay(
                                 drawRect(
                                     brush = Brush.verticalGradient(
                                         0.0f to ambientPrimaryColor.copy(alpha = (0.05f * intensity).coerceIn(0f, 0.15f)),
-                                        0.48f to ambientTertiaryColor.copy(alpha = (0.09f * intensity).coerceIn(0f, 0.24f)),
+                                        0.48f to ambientPrimaryColor.copy(alpha = (0.09f * intensity).coerceIn(0f, 0.24f)),
                                         0.86f to Color.Transparent
                                     ),
                                     size = Size(size.width, visibleBottom)
@@ -535,7 +582,7 @@ fun CalculatorDisplay(
                                     brush = Brush.verticalGradient(
                                         0.20f to Color.Transparent,
                                         0.58f to ambientPrimaryColor.copy(alpha = softWashAlpha),
-                                        0.86f to ambientTertiaryColor.copy(alpha = softWashAlpha * 0.45f),
+                                        0.86f to ambientPrimaryColor.copy(alpha = softWashAlpha * 0.45f),
                                         1.0f to Color.Transparent
                                     ),
                                     size = Size(size.width, visibleBottom)
@@ -572,25 +619,15 @@ fun CalculatorDisplay(
                                         )
                                     )
                                 )
-                                val frameBrush = Brush.horizontalGradient(
-                                    colors = listOf(
-                                        ambientPrimaryColor.copy(alpha = (0.72f * intensity).coerceIn(0f, 0.95f)),
-                                        ambientTertiaryColor.copy(alpha = (0.78f * intensity).coerceIn(0f, 0.95f)),
-                                        ambientPrimaryColor.copy(alpha = (0.72f * intensity).coerceIn(0f, 0.95f))
-                                    ),
-                                    startX = -size.width * 0.2f * ambientDrift,
-                                    endX = size.width * (1.0f + 0.2f * ambientDrift)
-                                )
+                                val frameAlpha = (0.76f * intensity).coerceIn(0f, 0.95f)
                                 drawPath(
                                     path = ambientBorderPath,
-                                    brush = frameBrush,
-                                    alpha = 0.24f,
+                                    color = ambientPrimaryColor.copy(alpha = frameAlpha * 0.28f),
                                     style = Stroke(width = outerStrokePx)
                                 )
                                 drawPath(
                                     path = ambientBorderPath,
-                                    brush = frameBrush,
-                                    alpha = 0.78f,
+                                    color = ambientPrimaryColor.copy(alpha = frameAlpha),
                                     style = Stroke(width = innerStrokePx)
                                 )
                             }
@@ -604,7 +641,7 @@ fun CalculatorDisplay(
                                 drawCircle(
                                     brush = Brush.radialGradient(
                                         0.0f to ambientPrimaryColor.copy(alpha = (0.38f * intensity).coerceIn(0f, 0.74f)),
-                                        0.42f to ambientTertiaryColor.copy(alpha = (0.20f * intensity).coerceIn(0f, 0.42f)),
+                                        0.42f to ambientPrimaryColor.copy(alpha = (0.20f * intensity).coerceIn(0f, 0.42f)),
                                         0.76f to ambientPrimaryColor.copy(alpha = (0.05f * intensity).coerceIn(0f, 0.14f)),
                                         1.0f to Color.Transparent,
                                         center = horizonCenter,
@@ -617,7 +654,7 @@ fun CalculatorDisplay(
                                     brush = Brush.verticalGradient(
                                         0.20f to Color.Transparent,
                                         0.52f to ambientPrimaryColor.copy(alpha = (0.15f * intensity).coerceIn(0f, 0.34f)),
-                                        0.68f to ambientTertiaryColor.copy(alpha = (0.25f * intensity).coerceIn(0f, 0.50f)),
+                                        0.68f to ambientPrimaryColor.copy(alpha = (0.25f * intensity).coerceIn(0f, 0.50f)),
                                         0.88f to ambientPrimaryColor.copy(alpha = (0.06f * intensity).coerceIn(0f, 0.16f)),
                                         1.0f to Color.Transparent
                                     ),
@@ -970,6 +1007,8 @@ fun CalculatorDisplay(
                             horizontalArrangement = Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val shimmerPrimary = MaterialTheme.colorScheme.primary
+                            val shimmerTertiary = MaterialTheme.colorScheme.tertiary
                             SelectionContainer {
                                 Text(
                                     text = mainDisplayText,
@@ -987,15 +1026,38 @@ fun CalculatorDisplay(
                                         .graphicsLayer {
                                             val p = resultRevealAnim.value
                                             if (p != 1f) {
-                                                alpha = (0.25f + 0.75f * p).coerceIn(0f, 1f)
-                                                if (state.resultAnimStyle == ResultAnimStyle.ELASTIC_POP) {
-                                                    val s = 0.84f + 0.16f * p
-                                                    scaleX = s
-                                                    scaleY = s
-                                                    transformOrigin = TransformOrigin(1f, 0.5f)
-                                                    translationY = (1f - p) * 8.dp.toPx()
-                                                } else {
-                                                    translationY = (1f - p) * 14.dp.toPx()
+                                                alpha = (0.12f + 0.88f * p).coerceIn(0f, 1f)
+                                                when (state.resultAnimStyle) {
+                                                    ResultAnimStyle.SLIDE_UP -> {
+                                                        translationY = (1f - p) * 18.dp.toPx()
+                                                    }
+                                                    ResultAnimStyle.ELASTIC_POP -> {
+                                                        val s = 0.72f + 0.28f * p
+                                                        scaleX = s
+                                                        scaleY = s
+                                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                                        translationY = (1f - p) * 6.dp.toPx()
+                                                    }
+                                                    ResultAnimStyle.SHIMMER_SWEEP -> {
+                                                        val s = 0.94f + 0.06f * p
+                                                        scaleX = s
+                                                        scaleY = s
+                                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                                    }
+                                                    ResultAnimStyle.ZOOM_FOCUS -> {
+                                                        val s = 1.24f - 0.24f * p
+                                                        scaleX = s
+                                                        scaleY = s
+                                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                                    }
+                                                    ResultAnimStyle.GLIDE_RIGHT -> {
+                                                        translationX = (1f - p) * 34.dp.toPx()
+                                                    }
+                                                    ResultAnimStyle.FLIP_REVEAL -> {
+                                                        rotationX = (1f - p) * -72f
+                                                        cameraDistance = 12f * 1.dp.toPx()
+                                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                                    }
                                                 }
                                             }
                                             if (state.resultAnimStyle == ResultAnimStyle.SHIMMER_SWEEP &&
@@ -1005,18 +1067,37 @@ fun CalculatorDisplay(
                                             }
                                         }
                                         .drawWithContent {
-                                            drawContent()
                                             val sh = resultShimmerAnim.value
-                                            if (state.resultAnimStyle == ResultAnimStyle.SHIMMER_SWEEP &&
+                                            val isGleaming = state.resultAnimStyle == ResultAnimStyle.SHIMMER_SWEEP &&
                                                 sh > 0.001f && sh < 0.999f
-                                            ) {
-                                                val bandW = (size.width * 0.36f).coerceAtLeast(52.dp.toPx())
+                                            if (isGleaming) {
+                                                val bandW = (size.width * 0.56f).coerceAtLeast(64.dp.toPx())
+                                                val startX = -bandW + (size.width + bandW * 2f) * sh
+                                                drawRoundRect(
+                                                    brush = Brush.linearGradient(
+                                                        colors = listOf(
+                                                            Color.Transparent,
+                                                            shimmerPrimary.copy(alpha = 0.26f),
+                                                            shimmerTertiary.copy(alpha = 0.20f),
+                                                            Color.Transparent
+                                                        ),
+                                                        start = Offset(startX, 0f),
+                                                        end = Offset(startX + bandW, size.height)
+                                                    ),
+                                                    cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx())
+                                                )
+                                            }
+                                            drawContent()
+                                            if (isGleaming) {
+                                                val bandW = (size.width * 0.54f).coerceAtLeast(60.dp.toPx())
                                                 val startX = -bandW + (size.width + bandW * 2f) * sh
                                                 drawRect(
                                                     brush = Brush.linearGradient(
                                                         colors = listOf(
                                                             Color.Transparent,
-                                                            Color.White.copy(alpha = 0.65f),
+                                                            shimmerPrimary.copy(alpha = 0.95f),
+                                                            Color.White.copy(alpha = 0.92f),
+                                                            shimmerTertiary.copy(alpha = 0.95f),
                                                             Color.Transparent
                                                         ),
                                                         start = Offset(startX, 0f),

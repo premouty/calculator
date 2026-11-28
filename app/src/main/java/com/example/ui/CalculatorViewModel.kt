@@ -111,6 +111,8 @@ data class CalculatorUiState(
     val isVoiceInputDialogOpen: Boolean = false,
     val isSettingsSheetOpen: Boolean = false,
     val settingsVibrationExpanded: Boolean = false,
+    val settingsDynamicColorExpanded: Boolean = false,
+    val settingsDesignTab: Int = 0,
     val bigNumberViewerRecord: Pair<String, String>? = null, // title/expression to full plain digits
     val history: List<CalculationRecord> = emptyList()
 )
@@ -1300,6 +1302,19 @@ class CalculatorViewModel(application: Application) : AndroidViewModel(applicati
     fun setSettingsVibrationExpanded(expanded: Boolean) {
         if (_state.value.settingsVibrationExpanded != expanded) {
             _state.update { it.copy(settingsVibrationExpanded = expanded) }
+        }
+    }
+
+    fun setSettingsDynamicColorExpanded(expanded: Boolean) {
+        if (_state.value.settingsDynamicColorExpanded != expanded) {
+            _state.update { it.copy(settingsDynamicColorExpanded = expanded) }
+        }
+    }
+
+    fun setSettingsDesignTab(tab: Int) {
+        val normalized = tab.coerceIn(0, 1)
+        if (_state.value.settingsDesignTab != normalized) {
+            _state.update { it.copy(settingsDesignTab = normalized) }
         }
     }
 

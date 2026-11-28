@@ -912,6 +912,8 @@ fun CalculatorScreen(
                 onDismiss = { viewModel.setSettingsSheetOpen(false) },
                 onSaveScrollPosition = viewModel::saveSettingsScrollPosition,
                 onToggleVibrationExpanded = viewModel::setSettingsVibrationExpanded,
+                onToggleDynamicColorExpanded = viewModel::setSettingsDynamicColorExpanded,
+                onSelectDesignTab = viewModel::setSettingsDesignTab,
                 onToggleSound = viewModel::toggleSoundEnabled,
                 onChangeSoundVolume = viewModel::setSoundVolume,
                 onPreviewSoundVolume = viewModel::previewSoundVolume,

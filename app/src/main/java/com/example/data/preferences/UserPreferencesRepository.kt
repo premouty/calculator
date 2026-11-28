@@ -74,7 +74,10 @@ enum class ExpressiveTouchStyle {
 enum class ResultAnimStyle {
     SLIDE_UP,
     ELASTIC_POP,
-    SHIMMER_SWEEP
+    SHIMMER_SWEEP,
+    ZOOM_FOCUS,
+    GLIDE_RIGHT,
+    FLIP_REVEAL
 }
 
 enum class ThemeAnimStyle {

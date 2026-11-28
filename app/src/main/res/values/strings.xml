@@ -86,6 +86,7 @@
     <string name="settings_haptic_medium">Середня</string>
     <string name="settings_haptic_strong">Сильна</string>
     <string name="settings_haptic_advanced_toggle">Розгорнуті налаштування вібрації</string>
+    <string name="settings_haptic_summary_accent">%1$s · акцент на «=»</string>
     <string name="settings_haptic_style_title">Режим вібрації</string>
     <string name="settings_haptic_style_adaptive">Адаптивна</string>
     <string name="settings_haptic_style_system">Системна</string>
@@ -112,6 +113,8 @@
     <string name="settings_dynamic_vibrancy_natural">М’яка</string>
     <string name="settings_dynamic_vibrancy_balanced">Баланс</string>
     <string name="settings_dynamic_vibrancy_vivid">Яскрава</string>
+    <string name="settings_dynamic_color_expand">Параметри палітри</string>
+    <string name="settings_dynamic_color_hide">Сховати параметри</string>
     <string name="settings_color_buttons_title">Кнопки під колір теми</string>
     <string name="settings_color_buttons_digits">Цифри</string>
     <string name="settings_color_buttons_operators">Оператори</string>
@@ -130,6 +133,9 @@
     <string name="settings_section_layout">Розмір і режим панелей</string>
     <string name="settings_section_customization_hub">Кастомізація та анімації</string>
     <string name="settings_subsection_layout_shape">Макет, форма та розмір</string>
+    <string name="settings_subsection_design_layout">Зовнішній вигляд, форма та макет</string>
+    <string name="settings_design_tab_appearance">Кольори й тема</string>
+    <string name="settings_design_tab_shape">Форма й розмір</string>
     <string name="settings_subsection_glow_display">Підсвітка та сяйво дисплея</string>
     <string name="settings_subsection_animations">Анімації та ефекти</string>
 
@@ -178,6 +184,10 @@
     <string name="settings_result_anim_slide">Плавно</string>
     <string name="settings_result_anim_pop">Стрибок</string>
     <string name="settings_result_anim_shimmer">Блік</string>
+    <string name="settings_result_anim_focus">Фокус</string>
+    <string name="settings_result_anim_glide">Потік</string>
+    <string name="settings_result_anim_flip">Переворот</string>
+    <string name="settings_result_anim_preview_hint">Натисніть, щоб перевірити «=»</string>
     <string name="settings_press_sparks_title">Експресивний відгук</string>
     <string name="settings_press_sparks_subtitle">Жива геометрія та тональні хвилі у стилі Material Expressive</string>
     <string name="settings_press_sparks_style_title">Стиль ефекту</string>

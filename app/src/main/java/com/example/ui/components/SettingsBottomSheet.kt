@@ -14,11 +14,13 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +28,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,29 +53,47 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.Backspace
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ColorLens
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.CropFree
+import androidx.compose.material.icons.rounded.CropSquare
 import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Flare
 import androidx.compose.material.icons.rounded.Functions
+import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.RoundedCorner
+import androidx.compose.material.icons.rounded.Tonality
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -87,6 +109,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -95,13 +118,17 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -114,10 +141,13 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.R
 import com.example.audio.CalcSoundType
@@ -158,6 +188,8 @@ fun SettingsBottomSheet(
     onDismiss: () -> Unit,
     onSaveScrollPosition: (Int, Int) -> Unit,
     onToggleVibrationExpanded: (Boolean) -> Unit,
+    onToggleDynamicColorExpanded: (Boolean) -> Unit,
+    onSelectDesignTab: (Int) -> Unit,
     onToggleSound: () -> Unit,
     onChangeSoundVolume: (Float) -> Unit,
     onPreviewSoundVolume: () -> Unit,
@@ -198,6 +230,7 @@ fun SettingsBottomSheet(
     )
     val scope = rememberCoroutineScope()
     val vibrationExpanded = state.settingsVibrationExpanded
+    val dynamicColorExpanded = state.settingsDynamicColorExpanded
 
     // Persist scroll only when idle or closing — zero StateFlow recompositions while swiping at 120Hz
     LaunchedEffect(listState) {
@@ -341,19 +374,50 @@ fun SettingsBottomSheet(
                         )
                     }
 
+                    val closeInteraction = remember { MutableInteractionSource() }
+                    val closePressed by closeInteraction.collectIsPressedAsState()
+                    val closeCorner by animateDpAsState(
+                        targetValue = if (closePressed) 12.dp else 20.dp,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "close_btn_corner"
+                    )
+                    val closeScale by animateFloatAsState(
+                        targetValue = if (closePressed) 0.90f else 1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessMedium
+                        ),
+                        label = "close_btn_scale"
+                    )
+                    val closeShape = RoundedCornerShape(closeCorner)
                     Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.size(40.dp)
+                        shape = closeShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .minimumInteractiveComponentSize()
+                            .graphicsLayer {
+                                scaleX = closeScale
+                                scaleY = closeScale
+                            }
+                            .clip(closeShape)
+                            .clickable(
+                                interactionSource = closeInteraction,
+                                indication = androidx.compose.material3.ripple(),
+                                onClick = onDismiss
+                            )
+                            .testTag("settings_close_button")
                     ) {
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.testTag("settings_close_button")
-                        ) {
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Rounded.Close,
                                 contentDescription = stringResource(R.string.cd_close),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -459,474 +523,272 @@ fun SettingsBottomSheet(
 
                     SettingsCardDivider()
 
-                SettingsSwitchRow(
-                    icon = null,
-                    isVibrationSwitch = true,
-                    title = stringResource(R.string.feedback_vibration_label),
-                    checked = state.isVibrationEnabled,
-                    onToggle = onToggleVibration,
-                    testTag = "settings_vibration_switch"
-                )
-
-                // Expandable detailed vibration controls (system haptic mode by default)
-                val chevronRotationState = animateFloatAsState(
-                    targetValue = if (vibrationExpanded) 180f else 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    ),
-                    label = "vibration_expand_chevron"
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .minimumInteractiveComponentSize()
-                        .clickable { onToggleVibrationExpanded(!vibrationExpanded) }
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .testTag("settings_haptic_advanced_toggle"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Tune,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Text(
-                            text = stringResource(R.string.settings_haptic_advanced_toggle),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Medium),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .graphicsLayer { rotationZ = chevronRotationState.value }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = vibrationExpanded,
-                    enter = fadeIn(tween(180)) + expandVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ),
-                    exit = fadeOut(tween(140)) + shrinkVertically()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp)
-                            .padding(bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.settings_haptic_intensity_title),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                val hapticOptions = listOf(
-                                    HapticIntensity.LIGHT to stringResource(R.string.settings_haptic_light),
-                                    HapticIntensity.MEDIUM to stringResource(R.string.settings_haptic_medium),
-                                    HapticIntensity.STRONG to stringResource(R.string.settings_haptic_strong)
-                                )
-                                hapticOptions.forEach { (intensity, label) ->
-                                    SettingsChoicePill(
-                                        label = label,
-                                        selected = state.hapticIntensity == intensity,
-                                        onClick = { onSelectHapticIntensity(intensity) },
-                                        modifier = Modifier.weight(1f),
-                                        testTag = "settings_haptic_${intensity.name.lowercase()}"
-                                    )
-                                }
-                            }
-                        }
-
-                        // Toggle distinct accent for '=' and operators
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { onToggleHapticAccentEquals(!state.hapticAccentEquals) }
-                                .padding(vertical = 4.dp)
-                                .testTag("settings_haptic_accent_equals_row"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text(
-                                    text = stringResource(R.string.settings_haptic_accent_equals_title),
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = stringResource(R.string.settings_haptic_accent_equals_subtitle),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = state.hapticAccentEquals,
-                                onCheckedChange = onToggleHapticAccentEquals
-                            )
-                        }
-
-                        // Instant haptic test buttons
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            SettingsChoicePill(
-                                label = stringResource(R.string.settings_haptic_test_digit),
-                                icon = Icons.Rounded.TouchApp,
-                                selected = false,
-                                onClick = { onTestHaptic(CalcSoundType.DIGIT) },
-                                modifier = Modifier.weight(1f),
-                                testTag = "settings_haptic_test_digit_button"
-                            )
-                            SettingsChoicePill(
-                                label = stringResource(R.string.settings_haptic_test_equals),
-                                icon = Icons.Rounded.TouchApp,
-                                selected = false,
-                                onClick = { onTestHaptic(CalcSoundType.EQUALS) },
-                                modifier = Modifier.weight(1f),
-                                testTag = "settings_haptic_test_equals_button"
-                            )
-                        }
-                    }
-                }
-                }
-                }
-
-                // Section 2: Appearance & Core Preferences
-                item(key = "section_appearance") {
-                SettingsSectionCard(title = stringResource(R.string.settings_section_appearance)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_theme_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.theme_dark),
-                            icon = Icons.Rounded.DarkMode,
-                            selected = state.themeMode == ThemeMode.DARK,
-                            onClick = { onSelectThemeMode(ThemeMode.DARK) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_dark"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.theme_light),
-                            icon = Icons.Rounded.LightMode,
-                            selected = state.themeMode == ThemeMode.LIGHT,
-                            onClick = { onSelectThemeMode(ThemeMode.LIGHT) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_theme_light"
-                        )
-                    }
-                }
-
-                SettingsCardDivider()
-
-                SettingsSwitchRow(
-                    icon = Icons.Rounded.ColorLens,
-                    title = stringResource(R.string.settings_dynamic_color_title),
-                    subtitle = stringResource(R.string.settings_dynamic_color_subtitle),
-                    checked = state.useDynamicColor,
-                    onToggle = { onToggleDynamicColor(!state.useDynamicColor) },
-                    testTag = "settings_dynamic_color_switch"
-                )
-
-                AnimatedVisibility(
-                    visible = state.useDynamicColor,
-                    enter = fadeIn(tween(200)) + expandVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ),
-                    exit = fadeOut(tween(150)) + shrinkVertically()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = stringResource(R.string.settings_dynamic_source_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val sourceOptions = listOf(
-                                DynamicColorSource.PRIMARY to stringResource(R.string.settings_dynamic_source_primary),
-                                DynamicColorSource.SECONDARY to stringResource(R.string.settings_dynamic_source_secondary),
-                                DynamicColorSource.TERTIARY to stringResource(R.string.settings_dynamic_source_tertiary)
-                            )
-                            sourceOptions.forEach { (source, label) ->
-                                SettingsChoicePill(
-                                    label = label,
-                                    selected = state.dynamicColorSource == source,
-                                    onClick = { onSelectDynamicColorSource(source) },
-                                    modifier = Modifier.weight(1f),
-                                    testTag = "settings_dynamic_source_${source.name.lowercase()}"
-                                )
-                            }
-                        }
-
-                        Text(
-                            text = stringResource(R.string.settings_dynamic_vibrancy_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val vibrancyOptions = listOf(
-                                DynamicColorVibrancy.NATURAL to stringResource(R.string.settings_dynamic_vibrancy_natural),
-                                DynamicColorVibrancy.BALANCED to stringResource(R.string.settings_dynamic_vibrancy_balanced),
-                                DynamicColorVibrancy.VIVID to stringResource(R.string.settings_dynamic_vibrancy_vivid)
-                            )
-                            vibrancyOptions.forEach { (vibrancy, label) ->
-                                SettingsChoicePill(
-                                    label = label,
-                                    selected = state.dynamicColorVibrancy == vibrancy,
-                                    onClick = { onSelectDynamicColorVibrancy(vibrancy) },
-                                    modifier = Modifier.weight(1f),
-                                    testTag = "settings_dynamic_vibrancy_${vibrancy.name.lowercase()}"
-                                )
-                            }
-                        }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = !state.useDynamicColor,
-                    enter = fadeIn(tween(200)) + expandVertically(
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    ),
-                    exit = fadeOut(tween(150)) + shrinkVertically()
-                ) {
-                    CustomAccentColorEditor(
-                        selectedAccentArgb = state.customAccentArgb,
-                        onSelectAccentArgb = onSelectCustomAccentArgb
-                    )
-                }
-
-                SettingsCardDivider()
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_color_buttons_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_color_buttons_digits),
-                            icon = if (state.colorTintDigits) Icons.Rounded.Check else null,
-                            selected = state.colorTintDigits,
-                            onClick = { onToggleColorTintDigits(!state.colorTintDigits) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_color_tint_digits"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_color_buttons_operators),
-                            icon = if (state.colorTintOperators) Icons.Rounded.Check else null,
-                            selected = state.colorTintOperators,
-                            onClick = { onToggleColorTintOperators(!state.colorTintOperators) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_color_tint_operators"
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_color_buttons_utilities),
-                            icon = if (state.colorTintUtilities) Icons.Rounded.Check else null,
-                            selected = state.colorTintUtilities,
-                            onClick = { onToggleColorTintUtilities(!state.colorTintUtilities) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_color_tint_utilities"
-                        )
-                        SettingsChoicePill(
-                            label = stringResource(R.string.settings_color_buttons_fx),
-                            icon = if (state.colorTintFx) Icons.Rounded.Check else null,
-                            selected = state.colorTintFx,
-                            onClick = { onToggleColorTintFx(!state.colorTintFx) },
-                            modifier = Modifier.weight(1f),
-                            testTag = "settings_color_tint_fx"
-                        )
-                    }
-                }
-
-                SettingsCardDivider()
-
-                SettingsSwitchRow(
-                    icon = Icons.Rounded.Visibility,
-                    title = stringResource(R.string.settings_live_preview_title),
-                    subtitle = stringResource(R.string.settings_live_preview_subtitle),
-                    checked = state.showLivePreview,
-                    onToggle = { onToggleLivePreview(!state.showLivePreview) },
-                    testTag = "settings_live_preview_switch"
+                SettingsVibrationSection(
+                    isVibrationEnabled = state.isVibrationEnabled,
+                    vibrationExpanded = vibrationExpanded,
+                    hapticIntensity = state.hapticIntensity,
+                    hapticAccentEquals = state.hapticAccentEquals,
+                    onToggleVibration = onToggleVibration,
+                    onToggleVibrationExpanded = { onToggleVibrationExpanded(!vibrationExpanded) },
+                    onSelectHapticIntensity = onSelectHapticIntensity,
+                    onToggleHapticAccentEquals = onToggleHapticAccentEquals,
+                    onTestHaptic = onTestHaptic
                 )
                 }
                 }
 
-                // Dedicated Section: Customization & Animations Hub
-                item(key = "customization_hub_header") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = stringResource(R.string.settings_section_customization_hub),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                }
-
-                // Hub Subsection A: Layout, Shapes & Sizes
-                item(key = "section_layout_shape") {
-                SettingsSectionCard(title = stringResource(R.string.settings_subsection_layout_shape)) {
+                // Unified Section 2: Appearance, Shape & Live Mockup (economical tabbed studio)
+                item(key = "section_design_layout") {
+                SettingsSectionCard(title = stringResource(R.string.settings_subsection_design_layout)) {
                 PanelLayoutPreviewCard(state = state)
 
                 SettingsCardDivider()
 
-                Column(
+                // Economical 2-tab Material 3 Expressive switcher directly below the live mockup
+                val designTab = state.settingsDesignTab.coerceIn(0, 1)
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.RoundedCorner,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_design_tab_appearance),
+                            icon = Icons.Rounded.Palette,
+                            selected = designTab == 0,
+                            onClick = { onSelectDesignTab(0) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_design_tab_appearance"
                         )
-                        Text(
-                            text = stringResource(R.string.settings_button_shape_title),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_design_tab_shape),
+                            icon = Icons.Rounded.RoundedCorner,
+                            selected = designTab == 1,
+                            onClick = { onSelectDesignTab(1) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_design_tab_shape"
                         )
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        val shapeOptions = listOf(
-                            ButtonShapeStyle.PILL to stringResource(R.string.settings_shape_pill),
-                            ButtonShapeStyle.SQUIRCLE to stringResource(R.string.settings_shape_squircle),
-                            ButtonShapeStyle.SHARP to stringResource(R.string.settings_shape_sharp)
-                        )
-                        shapeOptions.forEach { (style, label) ->
-                            SettingsChoicePill(
-                                label = label,
-                                selected = state.buttonShapeStyle == style,
-                                onClick = { onSelectButtonShape(style) },
-                                modifier = Modifier.weight(1f),
-                                testTag = "settings_button_shape_${style.name.lowercase()}"
+                }
+
+                AnimatedContent(
+                    targetState = designTab,
+                    transitionSpec = {
+                        fadeIn(tween(180)) togetherWith fadeOut(tween(130))
+                    },
+                    label = "design_layout_tab_content"
+                ) { activeTab ->
+                    if (activeTab == 0) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.settings_theme_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.theme_dark),
+                                        icon = Icons.Rounded.DarkMode,
+                                        selected = state.themeMode == ThemeMode.DARK,
+                                        onClick = { onSelectThemeMode(ThemeMode.DARK) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_theme_dark"
+                                    )
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.theme_light),
+                                        icon = Icons.Rounded.LightMode,
+                                        selected = state.themeMode == ThemeMode.LIGHT,
+                                        onClick = { onSelectThemeMode(ThemeMode.LIGHT) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_theme_light"
+                                    )
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsDynamicColorSection(
+                                useDynamicColor = state.useDynamicColor,
+                                dynamicColorExpanded = dynamicColorExpanded,
+                                dynamicColorSource = state.dynamicColorSource,
+                                dynamicColorVibrancy = state.dynamicColorVibrancy,
+                                onToggleDynamicColor = { onToggleDynamicColor(!state.useDynamicColor) },
+                                onToggleDynamicColorExpanded = { onToggleDynamicColorExpanded(!dynamicColorExpanded) },
+                                onSelectDynamicColorSource = onSelectDynamicColorSource,
+                                onSelectDynamicColorVibrancy = onSelectDynamicColorVibrancy
+                            )
+
+                            AnimatedVisibility(
+                                visible = !state.useDynamicColor,
+                                enter = fadeIn(tween(200)) + expandVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ),
+                                exit = fadeOut(tween(150)) + shrinkVertically()
+                            ) {
+                                CustomAccentColorEditor(
+                                    selectedAccentArgb = state.customAccentArgb,
+                                    onSelectAccentArgb = onSelectCustomAccentArgb
+                                )
+                            }
+
+                            SettingsCardDivider()
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.settings_color_buttons_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.settings_color_buttons_digits),
+                                        icon = if (state.colorTintDigits) Icons.Rounded.CheckCircle else Icons.Rounded.Dialpad,
+                                        selected = state.colorTintDigits,
+                                        onClick = { onToggleColorTintDigits(!state.colorTintDigits) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_color_tint_digits"
+                                    )
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.settings_color_buttons_operators),
+                                        icon = if (state.colorTintOperators) Icons.Rounded.CheckCircle else Icons.Rounded.Calculate,
+                                        selected = state.colorTintOperators,
+                                        onClick = { onToggleColorTintOperators(!state.colorTintOperators) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_color_tint_operators"
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.settings_color_buttons_utilities),
+                                        icon = if (state.colorTintUtilities) Icons.Rounded.CheckCircle else Icons.Rounded.Backspace,
+                                        selected = state.colorTintUtilities,
+                                        onClick = { onToggleColorTintUtilities(!state.colorTintUtilities) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_color_tint_utilities"
+                                    )
+                                    SettingsChoicePill(
+                                        label = stringResource(R.string.settings_color_buttons_fx),
+                                        icon = if (state.colorTintFx) Icons.Rounded.CheckCircle else Icons.Rounded.Functions,
+                                        selected = state.colorTintFx,
+                                        onClick = { onToggleColorTintFx(!state.colorTintFx) },
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "settings_color_tint_fx"
+                                    )
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsSwitchRow(
+                                icon = Icons.Rounded.Visibility,
+                                title = stringResource(R.string.settings_live_preview_title),
+                                subtitle = stringResource(R.string.settings_live_preview_subtitle),
+                                checked = state.showLivePreview,
+                                onToggle = { onToggleLivePreview(!state.showLivePreview) },
+                                testTag = "settings_live_preview_switch"
+                            )
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.RoundedCorner,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.settings_button_shape_title),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val shapeOptions = listOf(
+                                        Triple(ButtonShapeStyle.PILL, stringResource(R.string.settings_shape_pill), Icons.Rounded.Circle),
+                                        Triple(ButtonShapeStyle.SQUIRCLE, stringResource(R.string.settings_shape_squircle), Icons.Rounded.RoundedCorner),
+                                        Triple(ButtonShapeStyle.SHARP, stringResource(R.string.settings_shape_sharp), Icons.Rounded.CropSquare)
+                                    )
+                                    shapeOptions.forEach { (style, label, icon) ->
+                                        SettingsChoicePill(
+                                            label = label,
+                                            icon = icon,
+                                            selected = state.buttonShapeStyle == style,
+                                            onClick = { onSelectButtonShape(style) },
+                                            modifier = Modifier.weight(1f),
+                                            testTag = "settings_button_shape_${style.name.lowercase()}"
+                                        )
+                                    }
+                                }
+                            }
+
+                            SettingsCardDivider()
+
+                            SettingsScaleSliderRow(
+                                icon = Icons.Rounded.ViewModule,
+                                title = stringResource(R.string.settings_keypad_size_title),
+                                value = state.keypadScale,
+                                valueRange = 0.80f..1.18f,
+                                onValueChange = onChangeKeypadScale,
+                                testTag = "settings_keypad_scale_slider"
+                            )
+
+                            SettingsCardDivider()
+
+                            SettingsScaleSliderRow(
+                                icon = Icons.Rounded.Functions,
+                                title = stringResource(R.string.settings_fx_size_title),
+                                value = state.fxScale,
+                                valueRange = 0.78f..1.25f,
+                                onValueChange = onChangeFxScale,
+                                testTag = "settings_fx_scale_slider"
                             )
                         }
                     }
                 }
-
-                SettingsCardDivider()
-
-                SettingsScaleSliderRow(
-                    icon = Icons.Rounded.ViewModule,
-                    title = stringResource(R.string.settings_keypad_size_title),
-                    value = state.keypadScale,
-                    valueRange = 0.80f..1.18f,
-                    onValueChange = onChangeKeypadScale,
-                    testTag = "settings_keypad_scale_slider"
-                )
-
-                SettingsCardDivider()
-
-                SettingsScaleSliderRow(
-                    icon = Icons.Rounded.Functions,
-                    title = stringResource(R.string.settings_fx_size_title),
-                    value = state.fxScale,
-                    valueRange = 0.78f..1.25f,
-                    onValueChange = onChangeFxScale,
-                    testTag = "settings_fx_scale_slider"
-                )
                 }
                 }
 
@@ -960,13 +822,14 @@ fun SettingsBottomSheet(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         val glowTargetOptions = listOf(
-                            GlowTarget.ACCENT_KEYS to stringResource(R.string.settings_glow_target_accents),
-                            GlowTarget.ALL_KEYS to stringResource(R.string.settings_glow_target_all),
-                            GlowTarget.OFF to stringResource(R.string.settings_glow_target_off)
+                            Triple(GlowTarget.ACCENT_KEYS, stringResource(R.string.settings_glow_target_accents), Icons.Rounded.Flare),
+                            Triple(GlowTarget.ALL_KEYS, stringResource(R.string.settings_glow_target_all), Icons.Rounded.AutoAwesome),
+                            Triple(GlowTarget.OFF, stringResource(R.string.settings_glow_target_off), Icons.Rounded.VisibilityOff)
                         )
-                        glowTargetOptions.forEach { (target, label) ->
+                        glowTargetOptions.forEach { (target, label, icon) ->
                             SettingsChoicePill(
                                 label = label,
+                                icon = icon,
                                 selected = state.glowTarget == target,
                                 onClick = { onSelectGlowTarget(target) },
                                 modifier = Modifier.weight(1f),
@@ -1041,6 +904,7 @@ fun SettingsBottomSheet(
                             ) {
                                 SettingsChoicePill(
                                     label = stringResource(R.string.settings_display_glow_aurora),
+                                    icon = Icons.Rounded.AutoAwesome,
                                     selected = state.displayGlowStyle == DisplayGlowStyle.AURORA,
                                     onClick = { onSelectDisplayGlowStyle(DisplayGlowStyle.AURORA) },
                                     modifier = Modifier.weight(1f),
@@ -1048,6 +912,7 @@ fun SettingsBottomSheet(
                                 )
                                 SettingsChoicePill(
                                     label = stringResource(R.string.settings_display_glow_neon_frame),
+                                    icon = Icons.Rounded.CropFree,
                                     selected = state.displayGlowStyle == DisplayGlowStyle.NEON_FRAME,
                                     onClick = { onSelectDisplayGlowStyle(DisplayGlowStyle.NEON_FRAME) },
                                     modifier = Modifier.weight(1f),
@@ -1055,6 +920,7 @@ fun SettingsBottomSheet(
                                 )
                                 SettingsChoicePill(
                                     label = stringResource(R.string.settings_display_glow_horizon),
+                                    icon = Icons.Rounded.Gradient,
                                     selected = state.displayGlowStyle == DisplayGlowStyle.BOTTOM_HORIZON,
                                     onClick = { onSelectDisplayGlowStyle(DisplayGlowStyle.BOTTOM_HORIZON) },
                                     modifier = Modifier.weight(1f),
@@ -1095,25 +961,56 @@ fun SettingsBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = stringResource(R.string.settings_result_anim_title),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoFixHigh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Text(
+                                text = stringResource(R.string.settings_result_anim_title),
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                    val resultAnimRow1 = listOf(
+                        ResultAnimStyle.SLIDE_UP to stringResource(R.string.settings_result_anim_slide),
+                        ResultAnimStyle.ELASTIC_POP to stringResource(R.string.settings_result_anim_pop),
+                        ResultAnimStyle.SHIMMER_SWEEP to stringResource(R.string.settings_result_anim_shimmer)
+                    )
+                    val resultAnimRow2 = listOf(
+                        ResultAnimStyle.ZOOM_FOCUS to stringResource(R.string.settings_result_anim_focus),
+                        ResultAnimStyle.GLIDE_RIGHT to stringResource(R.string.settings_result_anim_glide),
+                        ResultAnimStyle.FLIP_REVEAL to stringResource(R.string.settings_result_anim_flip)
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        val resultAnimOptions = listOf(
-                            ResultAnimStyle.SLIDE_UP to stringResource(R.string.settings_result_anim_slide),
-                            ResultAnimStyle.ELASTIC_POP to stringResource(R.string.settings_result_anim_pop),
-                            ResultAnimStyle.SHIMMER_SWEEP to stringResource(R.string.settings_result_anim_shimmer)
-                        )
-                        resultAnimOptions.forEach { (style, label) ->
-                            SettingsChoicePill(
+                        resultAnimRow1.forEach { (style, label) ->
+                            ResultAnimOptionTile(
+                                style = style,
                                 label = label,
                                 selected = state.resultAnimStyle == style,
                                 onClick = { onSelectResultAnimStyle(style) },
@@ -1122,6 +1019,23 @@ fun SettingsBottomSheet(
                             )
                         }
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        resultAnimRow2.forEach { (style, label) ->
+                            ResultAnimOptionTile(
+                                style = style,
+                                label = label,
+                                selected = state.resultAnimStyle == style,
+                                onClick = { onSelectResultAnimStyle(style) },
+                                modifier = Modifier.weight(1f),
+                                testTag = "settings_result_anim_${style.name.lowercase()}"
+                            )
+                        }
+                    }
+
+                    ResultAnimPreviewStage(style = state.resultAnimStyle)
                 }
 
                 SettingsCardDivider()
@@ -1217,24 +1131,48 @@ fun SettingsBottomSheet(
 
                 // Animated Reset Pill
                 item(key = "section_reset") {
+                val resetInteraction = remember { MutableInteractionSource() }
+                val resetPressed by resetInteraction.collectIsPressedAsState()
+                val resetCorner by animateDpAsState(
+                    targetValue = if (resetPressed) 13.dp else 23.dp,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "reset_pill_corner"
+                )
+                val resetScale by animateFloatAsState(
+                    targetValue = if (resetPressed) 0.95f else 1f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "reset_pill_press_scale"
+                )
                 val resetBg by animateColorAsState(
                     targetValue = if (justReset) {
-                        MaterialTheme.colorScheme.primaryContainer
+                        MaterialTheme.colorScheme.primary
                     } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
+                        MaterialTheme.colorScheme.surfaceContainerHighest
                     },
-                    animationSpec = tween(240),
+                    animationSpec = tween(220),
                     label = "reset_pill_bg"
                 )
+                val confirmedResetFg = if (MaterialTheme.colorScheme.primary.luminance() > 0.46f) {
+                    Color(0xFF14161D)
+                } else {
+                    Color.White
+                }
                 val resetFg by animateColorAsState(
                     targetValue = if (justReset) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                        confirmedResetFg
                     } else {
                         MaterialTheme.colorScheme.primary
                     },
-                    animationSpec = tween(240),
+                    animationSpec = tween(220),
                     label = "reset_pill_fg"
                 )
+                val resetShape = RoundedCornerShape(resetCorner)
 
                 Box(
                     modifier = Modifier
@@ -1244,21 +1182,28 @@ fun SettingsBottomSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Surface(
-                        shape = CircleShape,
+                        shape = resetShape,
                         color = resetBg,
                         border = BorderStroke(
-                            width = 1.dp,
+                            width = if (justReset) 1.5.dp else 1.2.dp,
                             color = if (justReset) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                                MaterialTheme.colorScheme.primary
                             } else {
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
                             }
                         ),
                         modifier = Modifier
-                            .height(42.dp)
+                            .height(46.dp)
                             .minimumInteractiveComponentSize()
-                            .clip(CircleShape)
-                            .clickable {
+                            .graphicsLayer {
+                                scaleX = resetScale
+                                scaleY = resetScale
+                            }
+                            .clip(resetShape)
+                            .clickable(
+                                interactionSource = resetInteraction,
+                                indication = androidx.compose.material3.ripple()
+                            ) {
                                 onResetDefaults()
                                 scope.launch {
                                     justReset = true
@@ -1292,7 +1237,7 @@ fun SettingsBottomSheet(
                             .testTag("settings_reset_defaults_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 18.dp),
+                            modifier = Modifier.padding(horizontal = 20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
@@ -1519,20 +1464,53 @@ private fun ExpressiveColorPickerBlock(
         }
     }
 
+    val customInteraction = remember { MutableInteractionSource() }
+    val customPressed by customInteraction.collectIsPressedAsState()
+    val customPillCorner by animateDpAsState(
+        targetValue = when {
+            customPressed -> 9.dp
+            customSelected -> 20.dp
+            else -> 13.dp
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "custom_color_pill_corner"
+    )
+    val customPillScale by animateFloatAsState(
+        targetValue = when {
+            customPressed -> 0.94f
+            customSelected -> 1.02f
+            else -> 1f
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "custom_color_pill_scale"
+    )
+    val customPillShape = RoundedCornerShape(customPillCorner)
+    val selectedCustomBg = MaterialTheme.colorScheme.primary
+    val selectedCustomFg = if (selectedCustomBg.luminance() > 0.46f) {
+        Color(0xFF14161D)
+    } else {
+        Color.White
+    }
     val customPillBg by animateColorAsState(
         targetValue = if (customSelected) {
-            MaterialTheme.colorScheme.primaryContainer
+            selectedCustomBg
         } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+            MaterialTheme.colorScheme.surfaceContainerHighest
         },
         animationSpec = tween(180),
         label = "custom_color_pill_bg"
     )
     val customPillFg by animateColorAsState(
         targetValue = if (customSelected) {
-            MaterialTheme.colorScheme.onPrimaryContainer
+            selectedCustomFg
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.onSurface
         },
         animationSpec = tween(180),
         label = "custom_color_pill_fg"
@@ -1580,7 +1558,7 @@ private fun ExpressiveColorPickerBlock(
             }
         }
 
-        // Sub-header: Recommended label + Custom toggle pill
+        // Sub-header: Recommended label + Custom expressive toggle pill
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1592,20 +1570,28 @@ private fun ExpressiveColorPickerBlock(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Surface(
-                shape = CircleShape,
+                shape = customPillShape,
                 color = customPillBg,
                 border = if (customSelected) {
-                    BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+                    BorderStroke(1.3.dp, MaterialTheme.colorScheme.primary)
                 } else {
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.36f))
                 },
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClick = onSelectCustom)
+                    .graphicsLayer {
+                        scaleX = customPillScale
+                        scaleY = customPillScale
+                    }
+                    .clip(customPillShape)
+                    .clickable(
+                        interactionSource = customInteraction,
+                        indication = androidx.compose.material3.ripple(),
+                        onClick = onSelectCustom
+                    )
                     .testTag(customTestTag)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -1630,11 +1616,16 @@ private fun ExpressiveColorPickerBlock(
                                     )
                                 }
                             )
+                            .border(
+                                width = 1.dp,
+                                color = if (customSelected) customPillFg.copy(alpha = 0.45f) else Color.Transparent,
+                                shape = CircleShape
+                            )
                     )
                     Text(
                         text = stringResource(R.string.settings_color_custom),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = if (customSelected) FontWeight.SemiBold else FontWeight.Medium
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold
                         ),
                         color = customPillFg
                     )
@@ -1958,6 +1949,570 @@ private fun SettingsSwitchRow(
 }
 
 @Composable
+private fun SettingsVibrationSection(
+    isVibrationEnabled: Boolean,
+    vibrationExpanded: Boolean,
+    hapticIntensity: HapticIntensity,
+    hapticAccentEquals: Boolean,
+    onToggleVibration: () -> Unit,
+    onToggleVibrationExpanded: () -> Unit,
+    onSelectHapticIntensity: (HapticIntensity) -> Unit,
+    onToggleHapticAccentEquals: (Boolean) -> Unit,
+    onTestHaptic: (CalcSoundType) -> Unit
+) {
+    val badgeBg by animateColorAsState(
+        targetValue = if (isVibrationEnabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(200),
+        label = "vibration_badge_bg"
+    )
+    val badgeTint by animateColorAsState(
+        targetValue = if (isVibrationEnabled) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(200),
+        label = "vibration_badge_tint"
+    )
+    val intensityLabel = when (hapticIntensity) {
+        HapticIntensity.LIGHT -> stringResource(R.string.settings_haptic_light)
+        HapticIntensity.MEDIUM -> stringResource(R.string.settings_haptic_medium)
+        HapticIntensity.STRONG -> stringResource(R.string.settings_haptic_strong)
+    }
+    val summaryLabel = if (hapticAccentEquals) {
+        stringResource(R.string.settings_haptic_summary_accent, intensityLabel)
+    } else {
+        intensityLabel
+    }
+    val expandDescription = stringResource(R.string.settings_haptic_advanced_toggle)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onToggleVibration)
+                    .padding(vertical = 4.dp)
+                    .testTag("settings_vibration_switch"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(badgeBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    VibrationStatusIcon(
+                        enabled = isVibrationEnabled,
+                        tint = badgeTint,
+                        gapColor = badgeBg,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.feedback_vibration_label),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    AnimatedVisibility(
+                        visible = isVibrationEnabled,
+                        enter = fadeIn(tween(180)) + expandVertically(),
+                        exit = fadeOut(tween(120)) + shrinkVertically()
+                    ) {
+                        Text(
+                            text = summaryLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isVibrationEnabled,
+                enter = fadeIn(tween(180)) + expandHorizontally(expandFrom = Alignment.End),
+                exit = fadeOut(tween(130)) + shrinkHorizontally(shrinkTowards = Alignment.End)
+            ) {
+                SettingsInlineExpandPill(
+                    icon = Icons.Rounded.Tune,
+                    expanded = vibrationExpanded,
+                    contentDescription = expandDescription,
+                    onClick = onToggleVibrationExpanded,
+                    testTag = "settings_haptic_advanced_toggle"
+                )
+            }
+
+            Switch(
+                checked = isVibrationEnabled,
+                onCheckedChange = { onToggleVibration() }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = isVibrationEnabled && vibrationExpanded,
+            enter = fadeIn(tween(180)) + expandVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(140)) + shrinkVertically()
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_haptic_intensity_title),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val hapticOptions = listOf(
+                                Triple(HapticIntensity.LIGHT, stringResource(R.string.settings_haptic_light), Icons.Rounded.Vibration),
+                                Triple(HapticIntensity.MEDIUM, stringResource(R.string.settings_haptic_medium), Icons.Rounded.GraphicEq),
+                                Triple(HapticIntensity.STRONG, stringResource(R.string.settings_haptic_strong), Icons.Rounded.Bolt)
+                            )
+                            hapticOptions.forEach { (intensity, label, icon) ->
+                                SettingsChoicePill(
+                                    label = label,
+                                    icon = icon,
+                                    selected = hapticIntensity == intensity,
+                                    onClick = { onSelectHapticIntensity(intensity) },
+                                    modifier = Modifier.weight(1f),
+                                    testTag = "settings_haptic_${intensity.name.lowercase()}"
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .minimumInteractiveComponentSize()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onToggleHapticAccentEquals(!hapticAccentEquals) }
+                            .padding(vertical = 2.dp)
+                            .testTag("settings_haptic_accent_equals_row"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = stringResource(R.string.settings_haptic_accent_equals_title),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.settings_haptic_accent_equals_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = hapticAccentEquals,
+                            onCheckedChange = onToggleHapticAccentEquals
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_haptic_test_digit),
+                            icon = Icons.Rounded.TouchApp,
+                            selected = false,
+                            onClick = { onTestHaptic(CalcSoundType.DIGIT) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_haptic_test_digit_button"
+                        )
+                        SettingsChoicePill(
+                            label = stringResource(R.string.settings_haptic_test_equals),
+                            icon = Icons.Rounded.Bolt,
+                            selected = false,
+                            onClick = { onTestHaptic(CalcSoundType.EQUALS) },
+                            modifier = Modifier.weight(1f),
+                            testTag = "settings_haptic_test_equals_button"
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsInlineExpandPill(
+    icon: ImageVector,
+    expanded: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    val expandInteraction = remember { MutableInteractionSource() }
+    val isExpandPressed by expandInteraction.collectIsPressedAsState()
+    val pillCorner by animateDpAsState(
+        targetValue = when {
+            isExpandPressed -> 10.dp
+            expanded -> 18.dp
+            else -> 12.dp
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "inline_expand_pill_corner"
+    )
+    val pillScale by animateFloatAsState(
+        targetValue = if (isExpandPressed) 0.92f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "inline_expand_pill_scale"
+    )
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "inline_expand_chevron"
+    )
+    val pillBg by animateColorAsState(
+        targetValue = if (expanded) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(180),
+        label = "inline_expand_pill_bg"
+    )
+    val pillFg by animateColorAsState(
+        targetValue = if (expanded) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+        animationSpec = tween(180),
+        label = "inline_expand_pill_fg"
+    )
+    val pillShape = RoundedCornerShape(pillCorner)
+
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .testTag(testTag)
+            .semantics { this.contentDescription = contentDescription }
+            .clickable(
+                interactionSource = expandInteraction,
+                indication = androidx.compose.material3.ripple(bounded = false, radius = 24.dp),
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = pillShape,
+            color = pillBg,
+            border = BorderStroke(
+                width = if (expanded) 1.2.dp else 1.dp,
+                color = if (expanded) {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f)
+                }
+            ),
+            modifier = Modifier
+                .height(34.dp)
+                .graphicsLayer {
+                    scaleX = pillScale
+                    scaleY = pillScale
+                }
+                .clip(pillShape)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = pillFg,
+                    modifier = Modifier.size(15.dp)
+                )
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = pillFg,
+                    modifier = Modifier
+                        .size(17.dp)
+                        .graphicsLayer { rotationZ = chevronRotation }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsDynamicColorSection(
+    useDynamicColor: Boolean,
+    dynamicColorExpanded: Boolean,
+    dynamicColorSource: DynamicColorSource,
+    dynamicColorVibrancy: DynamicColorVibrancy,
+    onToggleDynamicColor: () -> Unit,
+    onToggleDynamicColorExpanded: () -> Unit,
+    onSelectDynamicColorSource: (DynamicColorSource) -> Unit,
+    onSelectDynamicColorVibrancy: (DynamicColorVibrancy) -> Unit
+) {
+    val badgeBg by animateColorAsState(
+        targetValue = if (useDynamicColor) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(200),
+        label = "dynamic_color_badge_bg"
+    )
+    val badgeTint by animateColorAsState(
+        targetValue = if (useDynamicColor) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(200),
+        label = "dynamic_color_badge_tint"
+    )
+    val sourceLabel = when (dynamicColorSource) {
+        DynamicColorSource.PRIMARY -> stringResource(R.string.settings_dynamic_source_primary)
+        DynamicColorSource.SECONDARY -> stringResource(R.string.settings_dynamic_source_secondary)
+        DynamicColorSource.TERTIARY -> stringResource(R.string.settings_dynamic_source_tertiary)
+    }
+    val vibrancyLabel = when (dynamicColorVibrancy) {
+        DynamicColorVibrancy.NATURAL -> stringResource(R.string.settings_dynamic_vibrancy_natural)
+        DynamicColorVibrancy.BALANCED -> stringResource(R.string.settings_dynamic_vibrancy_balanced)
+        DynamicColorVibrancy.VIVID -> stringResource(R.string.settings_dynamic_vibrancy_vivid)
+    }
+    val expandDescription = stringResource(
+        if (dynamicColorExpanded) {
+            R.string.settings_dynamic_color_hide
+        } else {
+            R.string.settings_dynamic_color_expand
+        }
+    )
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onToggleDynamicColor)
+                    .padding(vertical = 4.dp)
+                    .testTag("settings_dynamic_color_switch"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(badgeBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ColorLens,
+                        contentDescription = null,
+                        tint = badgeTint,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.settings_dynamic_color_title),
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (useDynamicColor) {
+                            "$sourceLabel · $vibrancyLabel"
+                        } else {
+                            stringResource(R.string.settings_dynamic_color_subtitle)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (useDynamicColor) 1 else 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = useDynamicColor,
+                enter = fadeIn(tween(180)) + expandHorizontally(expandFrom = Alignment.End),
+                exit = fadeOut(tween(130)) + shrinkHorizontally(shrinkTowards = Alignment.End)
+            ) {
+                SettingsInlineExpandPill(
+                    icon = Icons.Rounded.Palette,
+                    expanded = dynamicColorExpanded,
+                    contentDescription = expandDescription,
+                    onClick = onToggleDynamicColorExpanded,
+                    testTag = "settings_dynamic_color_expand_toggle"
+                )
+            }
+
+            Switch(
+                checked = useDynamicColor,
+                onCheckedChange = { onToggleDynamicColor() }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = useDynamicColor && dynamicColorExpanded,
+            enter = fadeIn(tween(180)) + expandVertically(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
+            exit = fadeOut(tween(140)) + shrinkVertically()
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = 12.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_dynamic_source_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val sourceOptions = listOf(
+                            Triple(DynamicColorSource.PRIMARY, stringResource(R.string.settings_dynamic_source_primary), Icons.Rounded.Palette),
+                            Triple(DynamicColorSource.SECONDARY, stringResource(R.string.settings_dynamic_source_secondary), Icons.Rounded.Tonality),
+                            Triple(DynamicColorSource.TERTIARY, stringResource(R.string.settings_dynamic_source_tertiary), Icons.Rounded.Contrast)
+                        )
+                        sourceOptions.forEach { (source, label, icon) ->
+                            SettingsChoicePill(
+                                label = label,
+                                icon = icon,
+                                selected = dynamicColorSource == source,
+                                onClick = { onSelectDynamicColorSource(source) },
+                                modifier = Modifier.weight(1f),
+                                testTag = "settings_dynamic_source_${source.name.lowercase()}"
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f)
+                    )
+
+                    Text(
+                        text = stringResource(R.string.settings_dynamic_vibrancy_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val vibrancyOptions = listOf(
+                            Triple(DynamicColorVibrancy.NATURAL, stringResource(R.string.settings_dynamic_vibrancy_natural), Icons.Rounded.WaterDrop),
+                            Triple(DynamicColorVibrancy.BALANCED, stringResource(R.string.settings_dynamic_vibrancy_balanced), Icons.Rounded.Tune),
+                            Triple(DynamicColorVibrancy.VIVID, stringResource(R.string.settings_dynamic_vibrancy_vivid), Icons.Rounded.AutoAwesome)
+                        )
+                        vibrancyOptions.forEach { (vibrancy, label, icon) ->
+                            SettingsChoicePill(
+                                label = label,
+                                icon = icon,
+                                selected = dynamicColorVibrancy == vibrancy,
+                                onClick = { onSelectDynamicColorVibrancy(vibrancy) },
+                                modifier = Modifier.weight(1f),
+                                testTag = "settings_dynamic_vibrancy_${vibrancy.name.lowercase()}"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SettingsChoicePill(
     label: String,
     selected: Boolean,
@@ -1966,74 +2521,100 @@ private fun SettingsChoicePill(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null
 ) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val cornerDp by animateDpAsState(
+        targetValue = when {
+            isPressed -> 10.dp
+            selected -> 22.dp
+            else -> 14.dp
         },
-        animationSpec = tween(180),
-        label = "choice_pill_bg"
-    )
-    val selectedTextColor = if (MaterialTheme.colorScheme.primaryContainer.luminance() < 0.35f) {
-        Color.White
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) {
-            selectedTextColor
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        animationSpec = tween(180),
-        label = "choice_pill_fg"
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "choice_pill_corner"
     )
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.02f else 1f,
+        targetValue = when {
+            isPressed -> 0.94f
+            selected -> 1.015f
+            else -> 1f
+        },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
         label = "choice_pill_scale"
     )
+    val selectedBg = MaterialTheme.colorScheme.primary
+    val selectedTextColor = if (selectedBg.luminance() > 0.46f) {
+        Color(0xFF14161D)
+    } else {
+        Color.White
+    }
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) {
+            selectedBg
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(180),
+        label = "choice_pill_bg"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            selectedTextColor
+        } else {
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+        },
+        animationSpec = tween(180),
+        label = "choice_pill_fg"
+    )
+    val shape = RoundedCornerShape(cornerDp)
 
     Surface(
-        shape = CircleShape,
+        shape = shape,
         color = containerColor,
         border = if (selected) {
-            BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f))
+            BorderStroke(1.3.dp, MaterialTheme.colorScheme.primary)
         } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f))
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.36f))
         },
         modifier = modifier
-            .height(38.dp)
+            .height(42.dp)
             .minimumInteractiveComponentSize()
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
+            .clip(shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick
+            )
             .testTag(testTag)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)
+            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)
         ) {
             if (icon != null) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = contentColor,
-                    modifier = Modifier.size(15.dp)
+                    tint = if (selected) contentColor else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                    modifier = Modifier.size(14.dp)
                 )
             }
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium.copy(
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                    fontSize = 11.5.sp,
+                    letterSpacing = (-0.1).sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
                 ),
                 color = contentColor,
                 maxLines = 1,
@@ -2128,6 +2709,585 @@ private fun ExpressiveTouchPreviewStage(
 }
 
 @Composable
+private fun ResultAnimOptionTile(
+    style: ResultAnimStyle,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String = ""
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(180),
+        label = "result_anim_tile_bg"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+        },
+        animationSpec = tween(180),
+        label = "result_anim_tile_fg"
+    )
+    val scale by animateFloatAsState(
+        targetValue = when {
+            isPressed -> 0.94f
+            selected -> 1.02f
+            else -> 1f
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "result_anim_tile_scale"
+    )
+    val cornerDp by animateDpAsState(
+        targetValue = when {
+            isPressed -> 10.dp
+            selected -> 22.dp
+            else -> 14.dp
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "result_anim_tile_corner"
+    )
+    val shape = RoundedCornerShape(cornerDp)
+    val primaryTint = if (selected) MaterialTheme.colorScheme.primary else contentColor
+    val secondaryTint = if (selected) MaterialTheme.colorScheme.tertiary else contentColor.copy(alpha = 0.68f)
+    val motionPath = remember { Path() }
+
+    Surface(
+        shape = shape,
+        color = containerColor,
+        border = if (selected) {
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f))
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
+        },
+        modifier = modifier
+            .height(64.dp)
+            .minimumInteractiveComponentSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick
+            )
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically)
+        ) {
+            Canvas(modifier = Modifier.size(22.dp)) {
+                val cx = size.width * 0.5f
+                val cy = size.height * 0.5f
+                val r = size.minDimension * 0.42f
+                when (style) {
+                    ResultAnimStyle.SLIDE_UP -> {
+                        val sw = 1.7.dp.toPx()
+                        // Trailing baseline bars fading upward
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.42f),
+                            start = Offset(cx - r * 0.72f, cy + r * 0.72f),
+                            end = Offset(cx + r * 0.72f, cy + r * 0.72f),
+                            strokeWidth = sw * 0.9f,
+                            cap = StrokeCap.Round
+                        )
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.72f),
+                            start = Offset(cx - r * 0.56f, cy + r * 0.25f),
+                            end = Offset(cx + r * 0.56f, cy + r * 0.25f),
+                            strokeWidth = sw,
+                            cap = StrokeCap.Round
+                        )
+                        // Upward chevron
+                        motionPath.reset()
+                        motionPath.moveTo(cx - r * 0.58f, cy - r * 0.14f)
+                        motionPath.lineTo(cx, cy - r * 0.72f)
+                        motionPath.lineTo(cx + r * 0.58f, cy - r * 0.14f)
+                        drawPath(
+                            path = motionPath,
+                            color = primaryTint,
+                            style = Stroke(width = sw * 1.1f, cap = StrokeCap.Round)
+                        )
+                    }
+                    ResultAnimStyle.ELASTIC_POP -> {
+                        drawRoundRect(
+                            color = primaryTint.copy(alpha = 0.22f),
+                            topLeft = Offset(cx - r * 0.62f, cy - r * 0.48f),
+                            size = Size(r * 1.24f, r * 0.96f),
+                            cornerRadius = CornerRadius(r * 0.34f, r * 0.34f)
+                        )
+                        drawRoundRect(
+                            color = primaryTint,
+                            topLeft = Offset(cx - r * 0.62f, cy - r * 0.48f),
+                            size = Size(r * 1.24f, r * 0.96f),
+                            cornerRadius = CornerRadius(r * 0.34f, r * 0.34f),
+                            style = Stroke(width = 1.6.dp.toPx())
+                        )
+                        val tickInner = r * 0.88f
+                        val tickOuter = r * 1.15f
+                        for (i in 0 until 4) {
+                            val angle = (45f + i * 90f) * (PI.toFloat() / 180f)
+                            val ca = cos(angle)
+                            val sa = sin(angle)
+                            drawLine(
+                                color = secondaryTint,
+                                start = Offset(cx + ca * tickInner, cy + sa * tickInner),
+                                end = Offset(cx + ca * tickOuter, cy + sa * tickOuter),
+                                strokeWidth = 1.6.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
+                    ResultAnimStyle.SHIMMER_SWEEP -> {
+                        drawRoundRect(
+                            color = primaryTint.copy(alpha = 0.18f),
+                            topLeft = Offset(cx - r * 0.92f, cy - r * 0.56f),
+                            size = Size(r * 1.84f, r * 1.12f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f)
+                        )
+                        drawRoundRect(
+                            color = primaryTint,
+                            topLeft = Offset(cx - r * 0.92f, cy - r * 0.56f),
+                            size = Size(r * 1.84f, r * 1.12f),
+                            cornerRadius = CornerRadius(r * 0.42f, r * 0.42f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.45f),
+                            start = Offset(cx - r * 0.48f, cy + r * 0.42f),
+                            end = Offset(cx + r * 0.48f, cy - r * 0.42f),
+                            strokeWidth = 3.6.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                        drawLine(
+                            color = secondaryTint,
+                            start = Offset(cx - r * 0.48f, cy + r * 0.42f),
+                            end = Offset(cx + r * 0.48f, cy - r * 0.42f),
+                            strokeWidth = 1.6.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                    ResultAnimStyle.ZOOM_FOCUS -> {
+                        val sw = 1.6.dp.toPx()
+                        val b = r * 0.96f
+                        val leg = r * 0.44f
+                        // Four corner focus viewfinder brackets closing inward
+                        motionPath.reset()
+                        // Top-left
+                        motionPath.moveTo(cx - b, cy - b + leg)
+                        motionPath.lineTo(cx - b, cy - b)
+                        motionPath.lineTo(cx - b + leg, cy - b)
+                        // Top-right
+                        motionPath.moveTo(cx + b - leg, cy - b)
+                        motionPath.lineTo(cx + b, cy - b)
+                        motionPath.lineTo(cx + b, cy - b + leg)
+                        // Bottom-right
+                        motionPath.moveTo(cx + b, cy + b - leg)
+                        motionPath.lineTo(cx + b, cy + b)
+                        motionPath.lineTo(cx + b - leg, cy + b)
+                        // Bottom-left
+                        motionPath.moveTo(cx - b + leg, cy + b)
+                        motionPath.lineTo(cx - b, cy + b)
+                        motionPath.lineTo(cx - b, cy + b - leg)
+                        drawPath(
+                            path = motionPath,
+                            color = primaryTint,
+                            style = Stroke(width = sw, cap = StrokeCap.Round)
+                        )
+                        drawCircle(
+                            color = secondaryTint.copy(alpha = 0.28f),
+                            radius = r * 0.50f,
+                            center = Offset(cx, cy)
+                        )
+                        drawCircle(
+                            color = primaryTint,
+                            radius = r * 0.24f,
+                            center = Offset(cx, cy)
+                        )
+                    }
+                    ResultAnimStyle.GLIDE_RIGHT -> {
+                        val sw = 1.7.dp.toPx()
+                        // Speed trail lines from right
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.45f),
+                            start = Offset(cx + r * 0.94f, cy - r * 0.45f),
+                            end = Offset(cx + r * 0.25f, cy - r * 0.45f),
+                            strokeWidth = sw * 0.9f,
+                            cap = StrokeCap.Round
+                        )
+                        drawLine(
+                            color = secondaryTint.copy(alpha = 0.72f),
+                            start = Offset(cx + r * 0.94f, cy + r * 0.45f),
+                            end = Offset(cx + r * 0.12f, cy + r * 0.45f),
+                            strokeWidth = sw * 0.9f,
+                            cap = StrokeCap.Round
+                        )
+                        // Center glide arrow pointing left
+                        drawLine(
+                            color = primaryTint,
+                            start = Offset(cx + r * 0.78f, cy),
+                            end = Offset(cx - r * 0.72f, cy),
+                            strokeWidth = sw,
+                            cap = StrokeCap.Round
+                        )
+                        motionPath.reset()
+                        motionPath.moveTo(cx - r * 0.22f, cy - r * 0.48f)
+                        motionPath.lineTo(cx - r * 0.76f, cy)
+                        motionPath.lineTo(cx - r * 0.22f, cy + r * 0.48f)
+                        drawPath(
+                            path = motionPath,
+                            color = primaryTint,
+                            style = Stroke(width = sw * 1.05f, cap = StrokeCap.Round)
+                        )
+                    }
+                    ResultAnimStyle.FLIP_REVEAL -> {
+                        // Split-flap flip card with center hinge line
+                        drawRoundRect(
+                            color = primaryTint.copy(alpha = 0.20f),
+                            topLeft = Offset(cx - r * 0.88f, cy - r * 0.78f),
+                            size = Size(r * 1.76f, r * 1.56f),
+                            cornerRadius = CornerRadius(r * 0.34f, r * 0.34f)
+                        )
+                        drawRoundRect(
+                            color = primaryTint,
+                            topLeft = Offset(cx - r * 0.88f, cy - r * 0.78f),
+                            size = Size(r * 1.76f, r * 1.56f),
+                            cornerRadius = CornerRadius(r * 0.34f, r * 0.34f),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+                        // Horizontal split-flap hinge
+                        drawLine(
+                            color = secondaryTint,
+                            start = Offset(cx - r * 0.88f, cy),
+                            end = Offset(cx + r * 0.88f, cy),
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                        // Curved flip arrow indicator on top half
+                        drawCircle(
+                            color = primaryTint.copy(alpha = 0.85f),
+                            radius = r * 0.16f,
+                            center = Offset(cx - r * 0.45f, cy - r * 0.36f)
+                        )
+                        drawCircle(
+                            color = secondaryTint.copy(alpha = 0.90f),
+                            radius = r * 0.16f,
+                            center = Offset(cx + r * 0.45f, cy + r * 0.36f)
+                        )
+                    }
+                }
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontSize = 11.5.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold
+                ),
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResultAnimPreviewStage(
+    style: ResultAnimStyle
+) {
+    val samples = remember {
+        listOf(
+            "24 × 7" to "168",
+            "15²" to "225",
+            "84 ÷ 2" to "42",
+            "12 × 9" to "108"
+        )
+    }
+    var sampleIndex by remember { mutableIntStateOf(0) }
+    var playTrigger by remember { mutableIntStateOf(0) }
+
+    val revealAnim = remember { Animatable(1f) }
+    val shimmerAnim = remember { Animatable(0f) }
+
+    LaunchedEffect(style, playTrigger) {
+        when (style) {
+            ResultAnimStyle.SLIDE_UP -> {
+                shimmerAnim.snapTo(0f)
+                revealAnim.snapTo(0f)
+                revealAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 200, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                )
+            }
+            ResultAnimStyle.ELASTIC_POP -> {
+                shimmerAnim.snapTo(0f)
+                revealAnim.snapTo(0f)
+                revealAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.46f,
+                        stiffness = 520f
+                    )
+                )
+            }
+            ResultAnimStyle.SHIMMER_SWEEP -> {
+                revealAnim.snapTo(0f)
+                launch {
+                    revealAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 160, easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f))
+                    )
+                }
+                launch {
+                    shimmerAnim.snapTo(0f)
+                    shimmerAnim.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 780, easing = CubicBezierEasing(0.22f, 0.82f, 0.28f, 1f))
+                    )
+                    shimmerAnim.snapTo(0f)
+                }
+            }
+            ResultAnimStyle.ZOOM_FOCUS -> {
+                shimmerAnim.snapTo(0f)
+                revealAnim.snapTo(0f)
+                revealAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.68f,
+                        stiffness = 480f
+                    )
+                )
+            }
+            ResultAnimStyle.GLIDE_RIGHT -> {
+                shimmerAnim.snapTo(0f)
+                revealAnim.snapTo(0f)
+                revealAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.78f,
+                        stiffness = 500f
+                    )
+                )
+            }
+            ResultAnimStyle.FLIP_REVEAL -> {
+                shimmerAnim.snapTo(0f)
+                revealAnim.snapTo(0f)
+                revealAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.66f,
+                        stiffness = 440f
+                    )
+                )
+            }
+        }
+    }
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val stageCorner by animateDpAsState(
+        targetValue = if (isPressed) 14.dp else 18.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "result_preview_corner"
+    )
+    val stageScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.97f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "result_preview_scale"
+    )
+    val stageShape = RoundedCornerShape(stageCorner)
+    val (expr, res) = samples[sampleIndex % samples.size]
+    val shimmerPrimary = MaterialTheme.colorScheme.primary
+    val shimmerTertiary = MaterialTheme.colorScheme.tertiary
+
+    Surface(
+        shape = stageShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = stageScale
+                scaleY = stageScale
+            }
+            .clip(stageShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple()
+            ) {
+                sampleIndex = (sampleIndex + 1) % samples.size
+                playTrigger += 1
+            }
+            .testTag("settings_result_anim_preview_stage")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.settings_result_anim_preview_hint),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Text(
+                    text = expr,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    maxLines = 1
+                )
+                Text(
+                    text = res,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .padding(horizontal = 4.dp)
+                        .graphicsLayer {
+                            val p = revealAnim.value
+                            if (p != 1f) {
+                                alpha = (0.12f + 0.88f * p).coerceIn(0f, 1f)
+                                when (style) {
+                                    ResultAnimStyle.SLIDE_UP -> {
+                                        translationY = (1f - p) * 18.dp.toPx()
+                                    }
+                                    ResultAnimStyle.ELASTIC_POP -> {
+                                        val s = 0.72f + 0.28f * p
+                                        scaleX = s
+                                        scaleY = s
+                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                        translationY = (1f - p) * 6.dp.toPx()
+                                    }
+                                    ResultAnimStyle.SHIMMER_SWEEP -> {
+                                        val s = 0.94f + 0.06f * p
+                                        scaleX = s
+                                        scaleY = s
+                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                    }
+                                    ResultAnimStyle.ZOOM_FOCUS -> {
+                                        val s = 1.24f - 0.24f * p
+                                        scaleX = s
+                                        scaleY = s
+                                        transformOrigin = TransformOrigin(1f, 0.5f)
+                                    }
+                                    ResultAnimStyle.GLIDE_RIGHT -> {
+                                        translationX = (1f - p) * 34.dp.toPx()
+                                    }
+                                    ResultAnimStyle.FLIP_REVEAL -> {
+                                        rotationX = (1f - p) * -72f
+                                        cameraDistance = 12f * density
+                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                    }
+                                }
+                            }
+                            if (style == ResultAnimStyle.SHIMMER_SWEEP && shimmerAnim.value in 0.001f..0.999f) {
+                                compositingStrategy = CompositingStrategy.Offscreen
+                            }
+                        }
+                        .drawWithContent {
+                            val sh = shimmerAnim.value
+                            val isGleaming = style == ResultAnimStyle.SHIMMER_SWEEP && sh > 0.001f && sh < 0.999f
+                            if (isGleaming) {
+                                val bandW = (size.width * 0.58f).coerceAtLeast(44.dp.toPx())
+                                val startX = -bandW + (size.width + bandW * 2f) * sh
+                                drawRoundRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            shimmerPrimary.copy(alpha = 0.28f),
+                                            shimmerTertiary.copy(alpha = 0.24f),
+                                            Color.Transparent
+                                        ),
+                                        start = Offset(startX, 0f),
+                                        end = Offset(startX + bandW, size.height)
+                                    ),
+                                    cornerRadius = CornerRadius(8.dp.toPx(), 8.dp.toPx())
+                                )
+                            }
+                            drawContent()
+                            if (isGleaming) {
+                                val bandW = (size.width * 0.56f).coerceAtLeast(42.dp.toPx())
+                                val startX = -bandW + (size.width + bandW * 2f) * sh
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            shimmerTertiary.copy(alpha = 0.95f),
+                                            Color.White.copy(alpha = 0.96f),
+                                            shimmerTertiary.copy(alpha = 0.95f),
+                                            Color.Transparent
+                                        ),
+                                        start = Offset(startX, 0f),
+                                        end = Offset(startX + bandW, size.height)
+                                    ),
+                                    blendMode = BlendMode.SrcAtop
+                                )
+                            }
+                        }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ExpressiveEffectOptionTile(
     style: ExpressiveTouchStyle,
     label: String,
@@ -2136,11 +3296,13 @@ private fun ExpressiveEffectOptionTile(
     modifier: Modifier = Modifier,
     testTag: String = ""
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val containerColor by animateColorAsState(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
+            MaterialTheme.colorScheme.surfaceContainerHighest
         },
         animationSpec = tween(180),
         label = "expressive_tile_bg"
@@ -2149,13 +3311,17 @@ private fun ExpressiveEffectOptionTile(
         targetValue = if (selected) {
             MaterialTheme.colorScheme.onPrimaryContainer
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
         },
         animationSpec = tween(180),
         label = "expressive_tile_fg"
     )
     val scale by animateFloatAsState(
-        targetValue = if (selected) 1.02f else 1f,
+        targetValue = when {
+            isPressed -> 0.94f
+            selected -> 1.02f
+            else -> 1f
+        },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -2163,7 +3329,11 @@ private fun ExpressiveEffectOptionTile(
         label = "expressive_tile_scale"
     )
     val cornerDp by animateDpAsState(
-        targetValue = if (selected) 22.dp else 14.dp,
+        targetValue = when {
+            isPressed -> 10.dp
+            selected -> 22.dp
+            else -> 14.dp
+        },
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -2179,9 +3349,9 @@ private fun ExpressiveEffectOptionTile(
         shape = shape,
         color = containerColor,
         border = if (selected) {
-            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.60f))
+            BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f))
         } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.34f))
         },
         modifier = modifier
             .height(60.dp)
@@ -2191,7 +3361,11 @@ private fun ExpressiveEffectOptionTile(
                 scaleY = scale
             }
             .clip(shape)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = androidx.compose.material3.ripple(),
+                onClick = onClick
+            )
             .testTag(testTag)
     ) {
         Column(
@@ -2480,6 +3654,12 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
         ButtonShapeStyle.SHARP -> 0.14f
     }
 
+    val livePreviewMix by animateFloatAsState(
+        targetValue = if (state.showLivePreview) 1f else 0f,
+        animationSpec = tween(180),
+        label = "preview_live_hint_mix"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2549,9 +3729,6 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                     if (state.ambientDisplayGlow) {
                         val dGlowMul = state.displayGlowIntensity.coerceIn(0.40f, 2.0f)
                         val ambPrimary = resolvedDisplayGlowColor ?: primaryColor
-                        val ambTertiary = resolvedDisplayGlowColor?.let {
-                            lerp(it, tertiaryColor, 0.42f)
-                        } ?: tertiaryColor
 
                         when (state.displayGlowStyle) {
                             DisplayGlowStyle.AURORA -> {
@@ -2571,7 +3748,7 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                                 val r2 = size.width * 0.44f
                                 drawCircle(
                                     brush = Brush.radialGradient(
-                                        0f to ambTertiary.copy(alpha = (0.28f * dGlowMul).coerceIn(0f, 0.60f)),
+                                        0f to ambPrimary.copy(alpha = (0.26f * dGlowMul).coerceIn(0f, 0.56f)),
                                         1f to Color.Transparent,
                                         center = c2,
                                         radius = r2
@@ -2641,13 +3818,16 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                         center = Offset(size.width - padX - dotR * 3.8f, padTop + 5.dp.toPx())
                     )
 
-                    // Schematic expression & result lines inside mini display
+                    // Schematic expression, main number, and live-preview hint lines inside mini display
                     val lineRight = size.width - padX - 2.dp.toPx()
-                    val resLineH = (8.5f * unit).coerceAtMost((displayBottom - padTop) * 0.24f).coerceAtLeast(4f)
-                    val exprLineH = (3.8f * unit).coerceAtMost((displayBottom - padTop) * 0.12f).coerceAtLeast(2.2f)
+                    val resLineH = (8.0f * unit).coerceAtMost((displayBottom - padTop) * 0.23f).coerceAtLeast(4f)
+                    val exprLineH = (3.5f * unit).coerceAtMost((displayBottom - padTop) * 0.11f).coerceAtLeast(2.2f)
+                    val liveHintH = (3.2f * unit).coerceAtMost((displayBottom - padTop) * 0.10f).coerceAtLeast(2.0f)
                     val resW = innerW * 0.48f
                     val exprW = innerW * 0.30f
-                    val resY = (displayBottom - 8.dp.toPx() - resLineH).coerceAtLeast(padTop + 14.dp.toPx())
+                    val liveHintW = innerW * 0.26f
+                    val bottomReserve = if (livePreviewMix > 0.05f) liveHintH + 4.dp.toPx() else 0f
+                    val resY = (displayBottom - 7.dp.toPx() - bottomReserve - resLineH).coerceAtLeast(padTop + 14.dp.toPx())
                     if (resY - exprLineH - 3.dp.toPx() >= padTop + 10.dp.toPx()) {
                         drawRoundRect(
                             color = displaySubLineColor,
@@ -2662,6 +3842,14 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                         size = Size(resW, resLineH),
                         cornerRadius = CornerRadius(resLineH / 2f, resLineH / 2f)
                     )
+                    if (livePreviewMix > 0.01f && resY + resLineH + 3.dp.toPx() + liveHintH <= displayBottom - 3.dp.toPx()) {
+                        drawRoundRect(
+                            color = primaryColor.copy(alpha = 0.65f * livePreviewMix),
+                            topLeft = Offset(lineRight - liveHintW, resY + resLineH + 3.dp.toPx()),
+                            size = Size(liveHintW, liveHintH),
+                            cornerRadius = CornerRadius(liveHintH / 2f, liveHintH / 2f)
+                        )
+                    }
 
                     // 2. Mini Toggle Strip (fx + Voice)
                     val chipW = 24.dp.toPx()
@@ -2787,56 +3975,25 @@ private fun PanelLayoutPreviewCard(state: CalculatorUiState) {
                 }
             }
 
-            // Right telemetry & quick fx-state toggle column
+            // Right telemetry & Material Expressive fx-state toggle column
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = if (previewFxOpen) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (previewFxOpen) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                SettingsChoicePill(
+                    label = stringResource(
+                        if (previewFxOpen) {
+                            R.string.settings_layout_preview_fx_open
                         } else {
-                            outlineTint.copy(alpha = 0.30f)
+                            R.string.settings_layout_preview_fx_closed
                         }
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(38.dp)
-                        .clip(CircleShape)
-                        .clickable { previewFxOpen = !previewFxOpen }
-                        .testTag("settings_layout_preview_toggle_fx")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        val toggleTextColor = if (previewFxOpen) {
-                            if (MaterialTheme.colorScheme.primaryContainer.luminance() < 0.35f) {
-                                Color.White
-                            } else {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            }
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                        Text(
-                            text = stringResource(
-                                if (previewFxOpen) {
-                                    R.string.settings_layout_preview_fx_open
-                                } else {
-                                    R.string.settings_layout_preview_fx_closed
-                                }
-                            ),
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = toggleTextColor
-                        )
-                    }
-                }
+                    icon = Icons.Rounded.Functions,
+                    selected = previewFxOpen,
+                    onClick = { previewFxOpen = !previewFxOpen },
+                    modifier = Modifier.fillMaxWidth(),
+                    testTag = "settings_layout_preview_toggle_fx"
+                )
 
                 PreviewMetricPill(
                     label = stringResource(R.string.settings_keypad_size_title),
