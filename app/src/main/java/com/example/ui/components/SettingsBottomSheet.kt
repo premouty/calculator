@@ -28,6 +28,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -96,6 +99,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
@@ -223,7 +227,10 @@ fun SettingsBottomSheet(
     onSelectDisplayGlowCustomArgb: (Long) -> Unit,
     onResetDefaults: () -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { targetValue -> targetValue != SheetValue.Hidden }
+    )
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = initialScrollIndex,
         initialFirstVisibleItemScrollOffset = initialScrollOffset
@@ -334,6 +341,10 @@ fun SettingsBottomSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .draggable(
+                        state = rememberDraggableState {},
+                        orientation = Orientation.Vertical
+                    )
                     .padding(horizontal = 20.dp)
             ) {
                 Row(
